@@ -41,11 +41,21 @@ php artisan vendor:publish --tag=secure-bridge-assets  # adds the browser script
 SECURE_BRIDGE_SESSION_KEY=true
 ```
 
-**3. Add one line to your main layout**, inside the `<head>` (after jQuery, if you use jQuery):
+**3. Add one line to the layout your pages share.**
+
+This is the Blade file that has your `<html>`, `<head>` and `<body>` — usually `resources/views/layouts/app.blade.php`. Open it and put `@secureBridge` just before the closing `</head>`:
 
 ```blade
-@secureBridge
+<head>
+    <title>My App</title>
+
+    @secureBridge   {{-- 👈 add this one line, just before </head> --}}
+</head>
 ```
+
+`@secureBridge` is a Blade tag — Laravel turns it into the small script that switches everything on, so it must be on a page (the `<head>` of your shared layout is the easy place; if you don't have a shared layout, add it to each page that talks to the server).
+
+*Using jQuery?* Just make sure your jQuery `<script>` line sits **above** `@secureBridge`.
 
 **4. Choose what to protect** in `routes/web.php`:
 
