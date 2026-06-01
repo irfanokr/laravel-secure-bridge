@@ -2,6 +2,8 @@
 
 Full, runnable JavaScript for the two cases asked about most — **plain AJAX** and **Angular** — plus the per-route server options. For React/Vue/Svelte see [INTEGRATION.md](INTEGRATION.md).
 
+> **You don't rewrite your requests.** Each example wires the package in **one** place (a Blade directive, an Angular interceptor, or a single `installFetch`/`installJQuery` call). Your existing `fetch` / `$.ajax` / `HttpClient` calls then sign themselves — no touching individual call sites.
+
 Every example assumes the server has a key:
 
 ```bash
@@ -103,19 +105,18 @@ let data = await res.json();
 data = await SecureBridge.processResponse(data);  // decrypts if encrypt_response is on
 ```
 
-### 1d. jQuery `$.ajax`
+### 1d. jQuery `$.ajax` — existing calls, unchanged
 
-`$.ajax` can't sign synchronously, so use the helper (already installed by `@secureBridge`, or call `SecureBridge.installJQuery(window.jQuery)`):
+`@secureBridge` already wired jQuery for you (or call `SecureBridge.installJQuery(window.jQuery)` once in a non-Blade app). After that, **your existing `$.ajax` / `$.post` / `$.get` code is signed automatically — you change nothing**:
 
 ```js
-$.secureAjax({
-  url: '/api/orders',
-  type: 'POST',
-  data: { item: 42 },
-}).then(function (data) {
-  // resolved with the (decrypted) response payload
-  console.log(data);
-});
+// existing code — now signed, no edits:
+$.ajax({ url: '/api/orders', type: 'POST', data: { item: 42 } })
+  .done(function (data) {
+    console.log(data);   // already decrypted if encrypt_response is on
+  });
+
+$.post('/api/orders', { item: 42 });   // covered too ($.post calls $.ajax internally)
 ```
 
 ### 1e. File upload (multipart) — just pass FormData
@@ -133,7 +134,7 @@ await fetch('/api/avatar', { method: 'POST', body: fd });
 
 ## 2. Angular
 
-Works in Angular 4.3+ (class interceptor) and 15+ (functional). Full class version:
+**Register one `HttpInterceptor` and every `HttpClient` call in your app is signed — you don't change a single `this.http.get/post(...)`.** Works in Angular 4.3+ (class interceptor) and 15+ (functional). Full class version:
 
 ```ts
 // secure-bridge.interceptor.ts

@@ -495,29 +495,85 @@
     }
 
     /**
-     * jQuery helper. Usage:
-     *   $.secureAjax({ url: '/api/x', type: 'POST', data: {...} }).then(function (data) { ... });
-     * Resolves with the (decrypted) response payload.
+     * Transparently wrap jQuery's $.ajax so EVERY existing call is signed with
+     * no code changes. Because $.get / $.post / $.getJSON / $().load() all call
+     * jQuery.ajax internally, they are covered too. Call once:
+     *
+     *   SecureBridge.configure({ key: '...' });
+     *   SecureBridge.installJQuery(window.jQuery);
+     *   // your existing $.ajax(...) / $.post(...) now sign automatically.
+     *
+     * Notes: signing is async, so the returned object is a jQuery promise
+     * (.done/.fail/.then/.always work, plus a best-effort .abort()). If you rely
+     * on synchronous jqXHR properties, use SecureBridge.prepare() manually.
      */
     function installJQuery($) {
-        $.secureAjax = function (options) {
+        if (!$ || $.__secureBridgeAjax) { return; }
+        var origAjax = $.ajax;
+        $.__secureBridgeAjax = origAjax;
+
+        $.ajax = function (url, options) {
+            // jQuery accepts $.ajax(url, options) or $.ajax(options).
+            if (typeof url === 'object') { options = url; url = undefined; }
             options = options || {};
-            var client = instance();
-            return client.prepare(options.type || options.method || 'GET', options.url || '', options.data).then(function (p) {
+            if (url) { options.url = url; }
+
+            var client;
+            try { client = instance(); } catch (e) { return origAjax.call($, options); }
+
+            var targetUrl = options.url || '';
+            var method = (options.type || options.method || 'GET').toUpperCase();
+            if (!isSameOrigin(targetUrl)) { return origAjax.call($, options); }
+
+            // For signed GETs, fold object data into the query string BEFORE
+            // signing, so the signed URL matches exactly what jQuery sends.
+            if (method === 'GET' && options.data && typeof options.data === 'object') {
+                var qs = $.param(options.data);
+                if (qs) { targetUrl += (targetUrl.indexOf('?') === -1 ? '?' : '&') + qs; }
+                options.url = targetUrl;
+                delete options.data;
+            }
+
+            // Decrypt the response for the success callback too, when enabled.
+            if (client.config.encryptResponse) {
+                var userSuccess = options.success;
+                options.success = function (data, textStatus, jqXHR) {
+                    if (data && typeof data === 'object') {
+                        client.processResponse(data).then(function (d) {
+                            if (userSuccess) { userSuccess(d, textStatus, jqXHR); }
+                        });
+                    } else if (userSuccess) { userSuccess(data, textStatus, jqXHR); }
+                };
+            }
+
+            var dfd = $.Deferred();
+            var inner = null;
+
+            client.prepare(method, targetUrl, options.data).then(function (p) {
                 options.headers = assign(options.headers || {}, p.headers);
+                options.url = p.url;
                 if (p.body !== undefined) {
                     options.data = p.body;
-                    options.contentType = 'application/json';
+                    options.contentType = options.contentType || 'application/json';
                     options.processData = false;
                 }
-                return $.ajax(options);
-            }).then(function (data) {
-                if (client.config.encryptResponse && data && typeof data === 'object') {
-                    return client.processResponse(data);
-                }
-                return data;
-            });
+                inner = origAjax.call($, options);
+                inner.then(function (data, textStatus, jqXHR) {
+                    if (client.config.encryptResponse && data && typeof data === 'object') {
+                        client.processResponse(data).then(function (d) { dfd.resolve(d, textStatus, jqXHR); });
+                    } else {
+                        dfd.resolve(data, textStatus, jqXHR);
+                    }
+                }, function (jqXHR, textStatus, err) { dfd.reject(jqXHR, textStatus, err); });
+            }, function (e) { dfd.reject(inner, 'error', e); });
+
+            var promise = dfd.promise();
+            promise.abort = function () { if (inner && inner.abort) { inner.abort(); } return promise; };
+            return promise;
         };
+
+        // Backward-compatible alias for anyone who called it explicitly.
+        $.secureAjax = $.ajax;
     }
 
     /**

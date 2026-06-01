@@ -77,7 +77,7 @@ declare namespace SecureBridge {
     function installFetch(target?: any): void;
     /** Register axios request/response interceptors (put query params in the URL). */
     function installAxios(axios: any): void;
-    /** Adds $.secureAjax(options) -> Promise<data>. */
+    /** Transparently wraps $.ajax (and $.get/$.post/$.getJSON) so existing calls sign automatically. No call-site changes. */
     function installJQuery($: any): void;
 
     const version: string;

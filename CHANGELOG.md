@@ -3,13 +3,27 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.4.2] - 2026-06-01
+
+### Changed (integration is now zero-touch)
+- **jQuery: `installJQuery($)` transparently wraps `$.ajax`.** Calling it once signs
+  every existing `$.ajax` / `$.get` / `$.post` / `$.getJSON` / `$().load()` call with
+  **no code changes** (those all call `$.ajax` internally). The old `$.secureAjax`
+  helper — which forced you to rewrite each call — is gone as the recommended path
+  (kept only as a backward-compatible alias). This matches how `installFetch` and
+  `installAxios` already worked, so **no framework requires rewriting your requests**.
+- **README rewritten around a single dead-simple quick start.** Install + protect
+  routes + one client line (pick Blade or SPA). The standalone beginner guide was
+  folded back into the README so there is one place to look.
+- **Removed the package-comparison table.** It didn't help anyone implement the
+  package and risked mischaracterising other authors' work.
+- **Docs reframed around the one central hook per framework** (fetch / axios /
+  Angular `HttpInterceptor` / jQuery `$.ajax` / Blade `@secureBridge`), making clear
+  you never touch individual call sites.
+
 ## [1.4.1] - 2026-06-01
 
 ### Documentation
-- **New beginner guide `docs/QUICKSTART.md`** — a plain-language, no-crypto-knowledge
-  walkthrough: pick-your-situation table, three copy-paste setups (Blade / decoupled
-  SPA / static), a "how do I know it's working" check, and a friendly error-message
-  reference (with the real response codes).
 - **Threat-model table now reflects the mitigations.** The README "what it does NOT
   protect against" section previously read as flat limitations; it now shows, per row,
   how the package shrinks each gap (token/session key sources and non-extractable

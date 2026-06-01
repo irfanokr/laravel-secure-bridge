@@ -1,14 +1,18 @@
 # Front-end integration guide
 
-`secure-bridge-client` is **framework-agnostic** — the same core works everywhere. There is exactly one thing to understand before the snippets:
+**The whole point: you wire this in ONE place, and your existing requests keep working unchanged.** You do **not** rewrite your `fetch` / `$http` / `$.ajax` / axios calls — there could be hundreds of them. Every framework already has a single central hook, and this package plugs into it:
 
-> **Web Crypto is asynchronous.** Every operation (`prepare`, `signUrl`, `processResponse`, …) returns a **Promise**. So integrations either (a) use `installFetch()`/`installAxios()` which handle the async for you, or (b) `await` / `.then()` `SecureBridge.prepare(...)` inside your HTTP layer.
+| Framework | The one hook you use | Your existing calls |
+|---|---|---|
+| Plain `fetch` (any framework) | `SecureBridge.installFetch()` — patches `window.fetch` | unchanged |
+| axios (Vue, React, …) | `SecureBridge.installAxios(axios)` — adds an interceptor | unchanged |
+| Angular `HttpClient` | one `HttpInterceptor`, registered once | unchanged |
+| jQuery / legacy AJAX | `SecureBridge.installJQuery($)` — wraps `$.ajax` | unchanged |
+| Blade app | the `@secureBridge` directive — wires fetch **and** jQuery for you | unchanged |
 
-Three things every integration does:
+Add the one-time setup for your framework below and you're done. (`SecureBridge.configure({ key })` runs once at startup; the Blade directive and the `token` handshake do it for you.)
 
-1. **Configure once** with the master key (`SecureBridge.configure({ key })`).
-2. **Sign/encrypt outgoing requests** — add `p.headers` and send `p.body`.
-3. **Decrypt responses** (only if `encryptResponse` is on) — run the JSON through `SecureBridge.processResponse(...)`.
+> **The only quirk:** Web Crypto is asynchronous, so signing is async. The central hooks above all handle that internally — you never touch a Promise. You only deal with async if you deliberately choose the manual `SecureBridge.prepare()` path for a one-off request.
 
 ---
 
@@ -262,19 +266,23 @@ if (browser) {                         // Web Crypto runs in the browser
 
 ## jQuery / AJAX
 
-Because signing is async and `beforeSend`/`ajaxPrefilter` are synchronous, use the provided helper instead of `$.ajax` directly:
+Call `installJQuery` **once**. It transparently wraps `$.ajax` — and since `$.get`, `$.post`, `$.getJSON` and `$().load()` all call `$.ajax` internally, **every existing call is signed with no edits**:
 
 ```js
 SecureBridge.configure({ key: KEY, sign: true });
-SecureBridge.installJQuery(window.jQuery);
+SecureBridge.installJQuery(window.jQuery);   // <-- the only line you add
 
-$.secureAjax({ url: '/api/login', type: 'POST', data: { username: 'demo' } })
-  .then(function (data) {
-    // `data` is already decrypted if encryptResponse is on
-  });
+// ...all your EXISTING code keeps working, now signed automatically:
+$.ajax({ url: '/api/login', type: 'POST', data: { username: 'demo' } })
+  .done(function (data) { /* decrypted if encryptResponse is on */ });
+
+$.post('/api/orders', { item: 42 });
+$.getJSON('/api/me');
 ```
 
-If you are inside a Blade app, `@secureBridge` already calls `installJQuery(window.jQuery)` for you.
+Inside a Blade app, `@secureBridge` calls `installJQuery(window.jQuery)` for you — there is nothing to wire at all.
+
+> Because signing is async, the wrapped `$.ajax` returns a jQuery **promise** (`.done` / `.fail` / `.then` / `.always`, plus a best-effort `.abort()`). That covers virtually all real-world usage. If some code depends on *synchronous* jqXHR object properties, use `SecureBridge.prepare()` manually for just those calls.
 
 ---
 
