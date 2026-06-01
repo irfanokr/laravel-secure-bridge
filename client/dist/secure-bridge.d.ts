@@ -73,11 +73,15 @@ declare namespace SecureBridge {
     function decryptEnvelope(envelope: string): Promise<any>;
     function processResponse(responseJson: any): Promise<any>;
 
+    /** The one call that covers everything: patches window.fetch AND XMLHttpRequest (so fetch, raw XHR, axios, jQuery and Angular HttpClient are all signed). No call-site changes. */
+    function install(target?: any): void;
     /** Monkey-patch window.fetch to auto-sign same-origin requests/responses. */
     function installFetch(target?: any): void;
-    /** Register axios request/response interceptors (put query params in the URL). */
+    /** Patch XMLHttpRequest so every XHR (incl. axios, jQuery, Angular HttpClient) is signed. No call-site changes. */
+    function installXHR(target?: any): void;
+    /** Register axios request/response interceptors. Usually unnecessary — install() already covers axios via the XHR patch. */
     function installAxios(axios: any): void;
-    /** Transparently wraps $.ajax (and $.get/$.post/$.getJSON) so existing calls sign automatically. No call-site changes. */
+    /** Wrap $.ajax so existing calls sign automatically. Usually unnecessary — install() already covers jQuery via the XHR patch. */
     function installJQuery($: any): void;
 
     const version: string;

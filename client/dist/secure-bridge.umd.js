@@ -89,6 +89,12 @@
         return out;
     }
 
+    // True only for the engine's built-in function (not a user/polyfill wrapper).
+    function isNativeFn(fn) {
+        try { return /\{\s*\[native code\]\s*\}/.test(Function.prototype.toString.call(fn)); }
+        catch (e) { return false; }
+    }
+
     // ---- primitives ------------------------------------------------------
 
     var AAD = 'secure-bridge:v1';
@@ -264,8 +270,13 @@
         var hasBody = body !== undefined && body !== null && WRITE_METHODS.indexOf(method) !== -1;
         var isForm = hasBody && (typeof FormData !== 'undefined' && body instanceof FormData);
         var isUrlEnc = hasBody && (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams);
-        // Multipart/binary bodies are never encrypted.
-        var needEnc = hasBody && cfg.encryptRequest && !isForm && !isUrlEnc;
+        var isBinary = hasBody && (
+            (typeof Blob !== 'undefined' && body instanceof Blob)
+            || (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer)
+            || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(body))
+        );
+        // Multipart / binary bodies are sent as-is and never encrypted.
+        var needEnc = hasBody && cfg.encryptRequest && !isForm && !isUrlEnc && !isBinary;
         var needSym = needEnc || (cfg.sign && !isEcdsa);
 
         var keysPromise = needSym ? self._derive() : Promise.resolve(null);
@@ -278,9 +289,10 @@
             if (!hasBody) {
                 sendBody = undefined;
                 hashStringPromise = Promise.resolve('');
-            } else if (isForm) {
-                // The browser sets the multipart boundary + Content-Type; we
-                // sign body-less (the server matches with an empty body digest).
+            } else if (isForm || isBinary) {
+                // The browser/library owns these bodies (multipart boundary or
+                // raw bytes); send them unchanged and sign body-less (the server
+                // matches with an empty body digest). Never JSON.stringify them.
                 sendBody = body;
                 hashStringPromise = Promise.resolve('');
             } else if (isUrlEnc) {
@@ -465,10 +477,110 @@
     }
 
     /**
+     * Transparently sign EVERY XMLHttpRequest. Because axios and jQuery both use
+     * XMLHttpRequest under the hood in the browser, this one patch covers raw
+     * XHR, axios and jQuery at once — existing request code is never changed.
+     *
+     * Signing is async (Web Crypto); XHR's send() is not. We simply defer the
+     * real send() until the signature is ready — we are still between open() and
+     * send(), so adding the signature headers with setRequestHeader is valid.
+     *
+     * Note: response DEcryption is not auto-applied at the XHR layer (the
+     * response is delivered straight to the caller). It is applied for fetch
+     * (installFetch); for XHR with encrypt_response, decrypt with
+     * SecureBridge.processResponse() in your handler. Signing always works.
+     */
+    function installXHR(target) {
+        var g = target || (typeof window !== 'undefined' ? window
+            : (typeof globalThis !== 'undefined' ? globalThis : self));
+        var XHR = g.XMLHttpRequest;
+        if (!XHR || XHR.__secureBridgeXHR) { return; }
+        var proto = XHR.prototype;
+        var origOpen = proto.open;
+        var origSend = proto.send;
+
+        proto.open = function (method, url, async) {
+            this.__sb = { method: method, url: url, async: async !== false };
+            return origOpen.apply(this, arguments);
+        };
+
+        proto.send = function (body) {
+            var xhr = this;
+            var meta = xhr.__sb;
+            var client;
+            try { client = instance(); } catch (e) { return origSend.call(xhr, body); }
+
+            // Synchronous XHR can't await async signing; non-same-origin and
+            // un-tracked requests pass through untouched.
+            if (!meta || meta.async === false || !isSameOrigin(meta.url)) {
+                return origSend.call(xhr, body);
+            }
+
+            client.prepare(meta.method, meta.url, body === undefined ? null : body).then(function (p) {
+                // If abort() ran during the async signing gap, the request is no
+                // longer OPENED — don't send it.
+                if (xhr.readyState !== 1) { return; }
+                try {
+                    var h = client.config.headers;
+                    if (p.headers[h.signature]) { xhr.setRequestHeader(h.signature, p.headers[h.signature]); }
+                    if (p.headers[h.timestamp]) { xhr.setRequestHeader(h.timestamp, p.headers[h.timestamp]); }
+                    if (p.headers[h.nonce]) { xhr.setRequestHeader(h.nonce, p.headers[h.nonce]); }
+
+                    var outBody = (p.body !== undefined) ? p.body : body;
+                    // Only re-declare Content-Type when the body was actually
+                    // transformed (e.g. encryption); for signing-only we keep the
+                    // caller's body and their own Content-Type untouched.
+                    if (p.headers['Content-Type'] && p.body !== undefined && p.body !== body) {
+                        xhr.setRequestHeader('Content-Type', p.headers['Content-Type']);
+                    }
+                    origSend.call(xhr, outBody === undefined ? null : outBody);
+                } catch (e) {
+                    if (xhr.readyState === 1) { origSend.call(xhr, body); }
+                }
+            }, function () {
+                // Signing failed: send unsigned so the request still goes out
+                // (a protected route will reject it, surfacing the real error).
+                if (xhr.readyState === 1) { origSend.call(xhr, body); }
+            });
+        };
+
+        // Truthy marker for idempotency + the installAxios/installJQuery guards.
+        // (origSend is already captured in the closure above.)
+        XHR.__secureBridgeXHR = true;
+    }
+
+    /**
+     * The one call that covers everything: patches XMLHttpRequest (which also
+     * covers axios, jQuery and Angular HttpClient) AND window.fetch. Call once at
+     * startup (or after handshake() in token mode) and every request the app
+     * already makes is signed — no other code changes.
+     *
+     * Note: this auto-decrypts responses only for fetch. If you enable
+     * encrypt_response, decrypt XHR/axios/jQuery/Angular replies with
+     * SecureBridge.processResponse(reply). Signing needs nothing extra.
+     */
+    function install(target) {
+        var g = target || (typeof window !== 'undefined' ? window
+            : (typeof globalThis !== 'undefined' ? globalThis : self));
+        installXHR(target);
+        // Patch fetch too, but skip a NON-native fetch (a polyfill built on
+        // XMLHttpRequest) when XHR exists — the XHR patch already covers it, and
+        // patching both would sign such a request twice. Any browser with Web
+        // Crypto has native fetch, so this only matters in exotic setups.
+        if (g && g.fetch && (isNativeFn(g.fetch) || !g.XMLHttpRequest)) {
+            installFetch(target);
+        }
+    }
+
+    /**
      * Axios request/response interceptors. NOTE: put query params in the URL
      * string (not config.params) so the signed path+query matches the wire.
+     *
+     * Usually unnecessary — install() already covers axios via the XHR patch.
+     * Use this only if you patch axios but not XMLHttpRequest.
      */
     function installAxios(axios) {
+        if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.__secureBridgeXHR) { return; }
         var client = instance();
         axios.interceptors.request.use(function (config) {
             var url = config.url || '';
@@ -506,9 +618,13 @@
      * Notes: signing is async, so the returned object is a jQuery promise
      * (.done/.fail/.then/.always work, plus a best-effort .abort()). If you rely
      * on synchronous jqXHR properties, use SecureBridge.prepare() manually.
+     *
+     * Usually unnecessary — install() already covers jQuery via the XHR patch.
+     * Use this only if you patch jQuery but not XMLHttpRequest.
      */
     function installJQuery($) {
         if (!$ || $.__secureBridgeAjax) { return; }
+        if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.__secureBridgeXHR) { return; }
         var origAjax = $.ajax;
         $.__secureBridgeAjax = origAjax;
 
@@ -644,7 +760,9 @@
         encryptPayload: function (o) { return instance().encryptPayload(o); },
         decryptEnvelope: function (e) { return instance().decryptEnvelope(e); },
         processResponse: function (o) { return instance().processResponse(o); },
+        install: install,
         installFetch: installFetch,
+        installXHR: installXHR,
         installAxios: installAxios,
         installJQuery: installJQuery,
         // low-level primitives, exported for tests / advanced use
@@ -654,7 +772,7 @@
             buildCanonical: buildCanonical, splitUrl: splitUrl, dropEmptyPairs: dropEmptyPairs,
             bytesToB64: bytesToB64, b64ToBytes: b64ToBytes
         },
-        version: '1.2.0'
+        version: '1.5.0'
     };
 
     return api;

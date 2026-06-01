@@ -3,6 +3,44 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.5.0] - 2026-06-01
+
+### Added — one call signs everything, no code changes
+- **`SecureBridge.install()`** patches both `window.fetch` **and** `XMLHttpRequest`.
+  Because axios, jQuery, and **Angular's `HttpClient`** all run on `XMLHttpRequest`
+  under the hood, this single call signs *every* request an app makes — regardless
+  of how it makes them — with **zero call-site changes**. This removes the need to
+  rewrite (or wrap) thousands of existing requests.
+- **`SecureBridge.installXHR()`** — the `XMLHttpRequest` patch on its own (covers
+  raw XHR, axios, jQuery, Angular HttpClient). Idempotent; signs the body as-is and
+  preserves the caller's own headers; signs body-less for `FormData` uploads;
+  passes through synchronous and cross-origin requests untouched.
+- The `@secureBridge` Blade directive now calls `install()`, so a Blade app's
+  `fetch`, jQuery, axios and XHR are all wired up by the one directive.
+
+### Changed
+- `installAxios()` / `installJQuery()` are now usually unnecessary (kept for the
+  rare case of patching one library but not `XMLHttpRequest`); they no-op when the
+  XHR patch is already active, so there is no risk of double-signing.
+
+### Robustness (from an adversarial review of the XHR patch)
+- **Binary bodies are no longer corrupted.** `Blob` / `ArrayBuffer` / typed-array
+  request bodies are now sent as-is and signed body-less (previously a stray
+  `JSON.stringify` could turn them into `{}`). Applies to both `fetch` and XHR.
+- **`abort()` during the async-signing gap is honoured** — the deferred `send()`
+  checks the XHR is still `OPENED` and won't fire on an aborted request.
+- **No double-signing with a fetch polyfill.** `install()` skips patching a
+  non-native `fetch` (a polyfill built on `XMLHttpRequest`) when XHR is present,
+  since the XHR patch already covers it.
+
+### Notes / limitations
+- Response *decryption* (only relevant if `encrypt_response` is on) is applied
+  automatically for `fetch`; for `XMLHttpRequest`-based requests (axios / jQuery /
+  Angular) call `SecureBridge.processResponse(reply)` in your handler, or use the
+  Angular interceptor (which decrypts for you). Plain signing needs nothing extra.
+- `JSONP` (`<script>`-tag requests, e.g. Angular `HttpClient.jsonp`) is not a normal
+  request and is not signed.
+
 ## [1.4.4] - 2026-06-01
 
 ### Fixed

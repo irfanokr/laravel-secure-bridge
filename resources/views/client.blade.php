@@ -8,12 +8,16 @@
             return;
         }
         window.SecureBridge.configure(@json($sbConfig));
-        // Auto-wire same-origin AJAX (window.fetch + jQuery if present).
-        if (typeof window.SecureBridge.installFetch === 'function') {
+        // Auto-wire EVERY same-origin request: install() patches window.fetch
+        // and XMLHttpRequest (which also covers axios and jQuery). One call,
+        // no page code changes.
+        if (typeof window.SecureBridge.install === 'function') {
+            window.SecureBridge.install();
+        } else if (typeof window.SecureBridge.installFetch === 'function') {
             window.SecureBridge.installFetch();
-        }
-        if (window.jQuery && typeof window.SecureBridge.installJQuery === 'function') {
-            window.SecureBridge.installJQuery(window.jQuery);
+            if (window.jQuery && typeof window.SecureBridge.installJQuery === 'function') {
+                window.SecureBridge.installJQuery(window.jQuery);
+            }
         }
     })();
 </script>

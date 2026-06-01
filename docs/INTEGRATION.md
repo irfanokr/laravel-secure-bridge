@@ -1,18 +1,35 @@
 # Front-end integration guide
 
-**The whole point: you wire this in ONE place, and your existing requests keep working unchanged.** You do **not** rewrite your `fetch` / `$http` / `$.ajax` / axios calls — there could be hundreds of them. Every framework already has a single central hook, and this package plugs into it:
+## The simple way — one line covers every framework
 
-| Framework | The one hook you use | Your existing calls |
+```js
+SecureBridge.configure({ key: '...' });   // or do the token handshake after login (below)
+SecureBridge.install();                    // signs every request — no code changes
+```
+
+`install()` patches the browser's request machinery: `window.fetch` **and** `XMLHttpRequest`. Because **axios, jQuery, and Angular's `HttpClient` all use `XMLHttpRequest` under the hood**, this single call signs all of them. You do **not** rewrite your `fetch` / `$http` / `$.ajax` / axios calls — there could be hundreds of them, and you change none.
+
+> **Two honest caveats:**
+> - **Response *decryption*** is auto-applied only for `fetch`. If you enable `encrypt_response`, decrypt XHR/axios/jQuery/Angular replies with `SecureBridge.processResponse(reply)` — or use the Angular interceptor below, which does it for you. (Plain signing, the default, needs nothing extra.)
+> - **JSONP** (`HttpClient.jsonp`, `<script>`-tag requests) is not a normal request and is not signed.
+
+> Web Crypto signing is asynchronous, but `install()` hides that — you never touch a Promise (unless you choose the manual `SecureBridge.prepare()` path for a one-off request).
+
+---
+
+## The framework-specific hooks (optional)
+
+You only need one of these if you are **not** calling `install()` — for example, you want axios/Angular **response decryption** handled natively, or you patch one library but not `XMLHttpRequest`.
+
+| Framework | Hook | What it adds over `install()` |
 |---|---|---|
-| Plain `fetch` (any framework) | `SecureBridge.installFetch()` — patches `window.fetch` | unchanged |
-| axios (Vue, React, …) | `SecureBridge.installAxios(axios)` — adds an interceptor | unchanged |
-| Angular `HttpClient` | one `HttpInterceptor`, registered once | unchanged |
-| jQuery / legacy AJAX | `SecureBridge.installJQuery($)` — wraps `$.ajax` | unchanged |
-| Blade app | the `@secureBridge` directive — wires fetch **and** jQuery for you | unchanged |
+| Plain `fetch` | `SecureBridge.installFetch()` | also auto-decrypts encrypted responses |
+| axios | `SecureBridge.installAxios(axios)` | request **and** response interceptors (decrypts) |
+| Angular `HttpClient` | an `HttpInterceptor` (below) | decrypts responses too; the Angular-native way |
+| jQuery | `SecureBridge.installJQuery($)` | wraps `$.ajax` (and `$.get`/`$.post`) |
+| Blade | the `@secureBridge` directive | calls `install()` for you — nothing to write |
 
-Add the one-time setup for your framework below and you're done. (`SecureBridge.configure({ key })` runs once at startup; the Blade directive and the `token` handshake do it for you.)
-
-> **The only quirk:** Web Crypto is asynchronous, so signing is async. The central hooks above all handle that internally — you never touch a Promise. You only deal with async if you deliberately choose the manual `SecureBridge.prepare()` path for a one-off request.
+(`installAxios`/`installJQuery` automatically do nothing if `install()` already patched `XMLHttpRequest`, so you can't accidentally double-sign.)
 
 ---
 
@@ -54,6 +71,8 @@ json = await SecureBridge.processResponse(json);   // no-op unless encryptRespon
 ---
 
 ## Angular
+
+> **You usually don't need an interceptor.** `SecureBridge.install()` already signs every Angular `HttpClient` request, because `HttpClient` uses `XMLHttpRequest` (and `install()` also covers `provideHttpClient(withFetch())`). Just call `install()` once after the handshake. Use the interceptor below **only** if you enabled `encrypt_response` and want responses decrypted automatically, or you prefer the Angular-native way.
 
 The client is identical across Angular versions; only **how you register an interceptor** changed. Pick the block for your version.
 

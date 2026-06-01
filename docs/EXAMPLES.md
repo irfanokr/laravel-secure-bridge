@@ -2,7 +2,7 @@
 
 Full, runnable JavaScript for the two cases asked about most — **plain AJAX** and **Angular** — plus the per-route server options. For React/Vue/Svelte see [INTEGRATION.md](INTEGRATION.md).
 
-> **You don't rewrite your requests.** Each example wires the package in **one** place (a Blade directive, an Angular interceptor, or a single `installFetch`/`installJQuery` call). Your existing `fetch` / `$.ajax` / `HttpClient` calls then sign themselves — no touching individual call sites.
+> **You don't rewrite your requests.** The simplest path is one line — `SecureBridge.install()` — which signs every `fetch`, `XMLHttpRequest`, axios, jQuery and Angular `HttpClient` request your app already makes. The examples below also show the framework-native hooks (Blade directive, Angular interceptor) for when you want response decryption handled inside the framework. Either way, you never touch individual call sites.
 
 Every example assumes the server has a key:
 
