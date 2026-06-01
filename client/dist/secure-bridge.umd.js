@@ -262,38 +262,54 @@
 
         var isEcdsa = self._signMode === 'ecdsa' && self._privateKey;
         var hasBody = body !== undefined && body !== null && WRITE_METHODS.indexOf(method) !== -1;
-        var needEnc = hasBody && cfg.encryptRequest;
+        var isForm = hasBody && (typeof FormData !== 'undefined' && body instanceof FormData);
+        var isUrlEnc = hasBody && (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams);
+        // Multipart/binary bodies are never encrypted.
+        var needEnc = hasBody && cfg.encryptRequest && !isForm && !isUrlEnc;
         var needSym = needEnc || (cfg.sign && !isEcdsa);
 
         var keysPromise = needSym ? self._derive() : Promise.resolve(null);
 
         return keysPromise.then(function (keys) {
             var headers = {};
-            var bodyPromise;
+            var sendBody;            // what we actually transmit
+            var hashStringPromise;   // string to hash for the canonical ('' = body-less)
 
-            if (hasBody) {
+            if (!hasBody) {
+                sendBody = undefined;
+                hashStringPromise = Promise.resolve('');
+            } else if (isForm) {
+                // The browser sets the multipart boundary + Content-Type; we
+                // sign body-less (the server matches with an empty body digest).
+                sendBody = body;
+                hashStringPromise = Promise.resolve('');
+            } else if (isUrlEnc) {
+                sendBody = body.toString();
+                headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+                hashStringPromise = Promise.resolve(sendBody);
+            } else {
                 var plaintext = (typeof body === 'string') ? body : JSON.stringify(body);
                 headers['Content-Type'] = 'application/json';
                 if (needEnc) {
-                    bodyPromise = aesGcmEncrypt(keys.enc, plaintext).then(function (env) {
-                        return JSON.stringify({ __cipher: env });
+                    hashStringPromise = aesGcmEncrypt(keys.enc, plaintext).then(function (env) {
+                        sendBody = JSON.stringify({ __cipher: env });
+                        return sendBody;
                     });
                 } else {
-                    bodyPromise = Promise.resolve(plaintext);
+                    sendBody = plaintext;
+                    hashStringPromise = Promise.resolve(plaintext);
                 }
-            } else {
-                bodyPromise = Promise.resolve('');
             }
 
-            return bodyPromise.then(function (bodyString) {
+            return hashStringPromise.then(function (hashString) {
                 if (!cfg.sign) {
-                    return { url: url, method: method, headers: headers, body: hasBody ? bodyString : undefined };
+                    return { url: url, method: method, headers: headers, body: hasBody ? sendBody : undefined };
                 }
                 var ts = Math.floor(Date.now() / 1000).toString();
                 var nonce = makeNonce();
                 var parts = splitUrl(url);
                 var query = dropEmptyPairs(parts.query, []);
-                return sha256Hex(bodyString).then(function (bodyHash) {
+                return sha256Hex(hashString).then(function (bodyHash) {
                     var canonical = buildCanonical(method, parts.path, query, ts, nonce, bodyHash);
                     var sigPromise = isEcdsa
                         ? getCrypto().subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, self._privateKey, utf8(canonical))
@@ -303,7 +319,7 @@
                         headers[cfg.headers.signature] = sigVal;
                         headers[cfg.headers.timestamp] = ts;
                         headers[cfg.headers.nonce] = nonce;
-                        return { url: url, method: method, headers: headers, body: hasBody ? bodyString : undefined };
+                        return { url: url, method: method, headers: headers, body: hasBody ? sendBody : undefined };
                     });
                 });
             });

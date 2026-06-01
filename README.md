@@ -154,7 +154,8 @@ That injects the client and a **per-session** key, and auto-wires `window.fetch`
 | `response_mode` | `SECURE_BRIDGE_RESPONSE_MODE` | `field` | `field` (encrypt one key) or `full`. |
 | `response_key` | `SECURE_BRIDGE_RESPONSE_KEY` | `data` | Field to encrypt in `field` mode. |
 | `only` / `except` | — | see file | URI patterns to exclude (mirrors Laravel's CSRF `$except`). The only bypass — no header/client-type bypass exists. |
-| `skip_multipart` | — | `true` | Skip `multipart/form-data` uploads. |
+| `sign_multipart` | `SECURE_BRIDGE_SIGN_MULTIPART` | `true` | Sign `multipart/form-data` uploads body-less (so they can't bypass the layer). Body is never encrypted. |
+| `require_https` | `SECURE_BRIDGE_REQUIRE_HTTPS` | `false` | Reject non-HTTPS requests (localhost exempt). |
 | `session_key.enabled` | `SECURE_BRIDGE_SESSION_KEY` | `false` | Per-session keys for Blade apps. |
 | `debug` | `SECURE_BRIDGE_DEBUG` | `false` | Log *why* a signature failed (dev only). |
 
@@ -253,6 +254,13 @@ SECURE_BRIDGE_SIGNATURE_DRIVER=ed25519
 Implement `Irfanokr\SecureBridge\Contracts\SignatureDriver` or `EncryptionDriver`.
 
 ---
+
+## Notes & limitations (by design)
+
+- **Response encryption scope.** `field` mode (default) encrypts only the configured key (`data`); other keys and error bodies are sent as-is. Use `response_mode=full` to encrypt the whole JSON body (covers errors too). Streamed / binary / file responses are never encrypted.
+- **Reading the decrypted body.** Controllers read decrypted fields via `$request->input()` / `all()` / `validated()`. `$request->getContent()` still returns the raw (encrypted) body — code that reads the raw stream directly should use the input bag instead.
+- **Header integrity.** The signature covers method, path, query, timestamp, nonce and a body digest — not arbitrary headers. `Authorization` is validated by your auth layer; if you need a specific header bound into the signature, supply a custom signature driver.
+- **Transport.** Always run behind HTTPS (set `require_https=true`); this layer is defense-in-depth on top of TLS, never a replacement.
 
 ## How this compares
 

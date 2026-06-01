@@ -48,6 +48,19 @@ class DoctorCommand extends Command
             $this->check('cache store reachable (replay protection)', false, true);
         }
 
+        if ($bridge->config('replay_protection', true)) {
+            $storeName = $bridge->config('nonce_store') ?: $this->laravel['config']->get('cache.default');
+            $driver = $this->laravel['config']->get('cache.stores.' . $storeName . '.driver');
+            // 'array' is per-process (replay protection effectively off); 'file'
+            // is persistent but NOT shared across multiple servers.
+            $persistentShared = ! in_array($driver, array('array', 'file'), true);
+            $this->check(
+                'nonce store is persistent & shared [' . $storeName . ':' . $driver . '] (use redis/memcached/database in prod)',
+                $persistentShared,
+                true
+            );
+        }
+
         $this->line('');
         $this->line('Configuration:');
         $keys = array(

@@ -129,4 +129,35 @@ class MiddlewareTest extends TestCase
         $decrypted = (new AesGcmEncryptionDriver())->decrypt($json['data'], $this->encKey());
         $this->assertSame(array('got' => 'secret-hi'), json_decode($decrypted, true));
     }
+
+    public function testMultipartRequestStillRequiresSignature()
+    {
+        // Previously a multipart Content-Type skipped the whole layer; now it
+        // must still be signed, so an unsigned multipart request is rejected.
+        $server = array('CONTENT_TYPE' => 'multipart/form-data; boundary=X');
+        $response = $this->call('POST', '/sb/echo', array(), array(), array(), $server, "--X--\r\n");
+
+        $response->assertStatus(400);
+        $response->assertJsonPath('code', 'missing_signature');
+    }
+
+    public function testValidSignedMultipartPasses()
+    {
+        $ts = (string) time();
+        $nonce = 'mp-1';
+        // Multipart is signed body-less (empty body digest).
+        $canonical = Canonicalizer::build('POST', '/sb/echo', '', $ts, $nonce, Canonicalizer::EMPTY_BODY_SHA256);
+        $sig = 'v1=' . (new HmacSignatureDriver())->sign($canonical, $this->signKey());
+
+        $server = array(
+            'CONTENT_TYPE'     => 'multipart/form-data; boundary=X',
+            'HTTP_X_SIG'        => $sig,
+            'HTTP_X_TIMESTAMP'  => $ts,
+            'HTTP_X_NONCE'      => $nonce,
+        );
+        $body = "--X\r\nContent-Disposition: form-data; name=\"msg\"\r\n\r\nhi\r\n--X--\r\n";
+        $response = $this->call('POST', '/sb/echo', array(), array(), array(), $server, $body);
+
+        $response->assertStatus(200);
+    }
 }

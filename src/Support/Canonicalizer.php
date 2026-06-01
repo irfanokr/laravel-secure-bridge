@@ -30,15 +30,21 @@ class Canonicalizer
     /**
      * @param  string[] $stripQueryKeys query keys to remove before signing
      */
-    public static function fromRequest(Request $request, $timestamp, $nonce, array $stripQueryKeys = array())
+    public static function fromRequest(Request $request, $timestamp, $nonce, array $stripQueryKeys = array(), $forceEmptyBody = false)
     {
         $method = strtoupper($request->getMethod());
 
         list($path, $query) = self::splitTarget($request->getRequestUri());
         $query = self::canonicalQuery($query, $stripQueryKeys);
 
-        $body = (string) $request->getContent();
-        $bodyHash = $body === '' ? self::EMPTY_BODY_SHA256 : hash('sha256', $body);
+        if ($forceEmptyBody) {
+            // Multipart uploads: the browser controls the serialization/boundary,
+            // so both sides sign over an empty body digest.
+            $bodyHash = self::EMPTY_BODY_SHA256;
+        } else {
+            $body = (string) $request->getContent();
+            $bodyHash = $body === '' ? self::EMPTY_BODY_SHA256 : hash('sha256', $body);
+        }
 
         return self::build($method, $path, $query, $timestamp, $nonce, $bodyHash);
     }

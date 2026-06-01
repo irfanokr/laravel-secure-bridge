@@ -297,6 +297,6 @@ await fetch(p.url, { method: p.method, headers: p.headers, body: p.body });
 ## Cross-cutting notes
 
 - **Query parameters:** the signed path+query must equal what the browser actually sends. With `fetch`/Angular `urlWithParams` this is automatic. With **axios `config.params`** or **jQuery `data` on GET**, the lib serializes params *after* signing — so put query params **in the URL string** for signed GETs, or use `SecureBridge.signUrl(url)` for download links.
-- **File uploads:** `multipart/form-data` is skipped by design (it can't be JSON-enveloped). Uploads still authenticate via your normal auth; for signed *downloads* use `signUrl()`.
+- **File uploads:** `multipart/form-data` bodies are **still signed** (body-less — the browser owns the boundary), so they can't bypass the layer; only the *encryption* of the body is skipped. Just pass a `FormData` as the body and the client handles it. For signed *downloads* use `signUrl()`.
 - **Verify your wiring:** run `php artisan secure-bridge:doctor` on the server and confirm your client reproduces the printed `X-Sig` for the given inputs. Set `SECURE_BRIDGE_DEBUG=true` locally to log the exact canonical string the server built when a signature fails.
 - **Clock skew:** the client uses the browser clock for the timestamp. A device clock off by more than `timestamp_window` (default 300s) will be rejected — widen the window or sync the clock.

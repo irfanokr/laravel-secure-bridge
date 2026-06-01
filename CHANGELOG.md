@@ -3,6 +3,25 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.3.0] - 2026-06-01
+
+### Changed / Fixed (hardening)
+- **Multipart no longer bypasses the layer.** `multipart/form-data` requests are
+  now still signed (body-less — the browser owns the boundary) instead of being
+  skipped, so a request can't slip past by claiming a multipart Content-Type.
+  Body encryption is still skipped for multipart. New `sign_multipart` config
+  (replaces `skip_multipart`); the JS client signs `FormData` and `URLSearchParams`
+  correctly.
+- **HTTPS enforcement.** New `require_https` config rejects non-TLS requests
+  (localhost exempt) with `insecure_transport`.
+- **Diagnostics.** `secure-bridge:doctor` now warns when the nonce store is not
+  persistent/shared (`array`/`file`), which would weaken replay protection.
+
+### Documented
+- Honest "Notes & limitations": response-encryption scope, raw-body-after-decrypt
+  behaviour, and that the signature covers method/path/query/ts/nonce/body — not
+  arbitrary headers.
+
 ## [1.2.0] - 2026-06-01
 
 ### Added

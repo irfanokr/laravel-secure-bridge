@@ -51,6 +51,13 @@ return [
     'encrypt_response' => (bool) env('SECURE_BRIDGE_ENCRYPT_RESPONSE', false),
 
     /*
+    | Reject any non-HTTPS request (localhost is always allowed for dev). This
+    | matters because the whole model is defense-in-depth ON TOP OF TLS — the
+    | handshake key and payloads must never travel in clear text.
+    */
+    'require_https' => (bool) env('SECURE_BRIDGE_REQUIRE_HTTPS', false),
+
+    /*
     |--------------------------------------------------------------------------
     | Drivers (swappable)
     |--------------------------------------------------------------------------
@@ -130,11 +137,14 @@ return [
     ],
 
     /*
-    | Multipart/form-data uploads cannot be JSON-encrypted by the browser
-    | client, so they are skipped by default. Signed downloads still work via
-    | the query-string transport.
+    | Multipart/form-data uploads can't be JSON-enveloped by the browser, so
+    | their body is never encrypted. But they ARE still signed (over the
+    | method + path + query + timestamp + nonce, with an empty body digest) so
+    | a request cannot skip the layer merely by claiming a multipart
+    | Content-Type. Set to false to skip multipart entirely (old behaviour) —
+    | only do this if those routes are otherwise protected.
     */
-    'skip_multipart' => true,
+    'sign_multipart' => (bool) env('SECURE_BRIDGE_SIGN_MULTIPART', true),
 
     /*
     |--------------------------------------------------------------------------

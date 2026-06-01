@@ -42,6 +42,10 @@ class SecureBridgeMiddleware
             return $next($request);
         }
 
+        if ($this->bridge->config('require_https', false) && ! $this->isSecure($request)) {
+            return $this->fail(400, 'HTTPS is required.', 'insecure_transport');
+        }
+
         $keyChain = $this->bridge->keyChainForRequest($request);
 
         $readiness = $this->bridge->readinessError($request, $keyChain);
@@ -87,12 +91,11 @@ class SecureBridgeMiddleware
             return true;
         }
 
-        // Multipart uploads can't be JSON-enveloped by the client.
-        if ($this->bridge->config('skip_multipart', true)) {
-            $contentType = (string) $request->header('content-type', '');
-            if (stripos($contentType, 'multipart/form-data') === 0) {
-                return true;
-            }
+        // Multipart is skipped entirely ONLY when multipart signing is disabled.
+        // Otherwise it is still signed (body-less) so it can't be used to slip
+        // past the layer by claiming a multipart Content-Type.
+        if (! $this->bridge->config('sign_multipart', true) && $this->isMultipart($request)) {
+            return true;
         }
 
         // Path scoping.
@@ -118,6 +121,22 @@ class SecureBridgeMiddleware
         }
 
         return false;
+    }
+
+    protected function isMultipart($request)
+    {
+        return stripos((string) $request->header('content-type', ''), 'multipart/form-data') === 0;
+    }
+
+    protected function isSecure($request)
+    {
+        if ($request->isSecure()) {
+            return true;
+        }
+
+        $host = strtolower((string) $request->getHost());
+
+        return $host === 'localhost' || $host === '127.0.0.1' || $host === '::1' || $host === '[::1]';
     }
 
     // -- Inbound: signature + timestamp + replay ---------------------------
@@ -151,7 +170,7 @@ class SecureBridgeMiddleware
             return $this->fail(400, 'Request timestamp outside the allowed window.', 'stale_timestamp');
         }
 
-        $canonical = Canonicalizer::fromRequest($request, (string) $ts, (string) $nonce, $stripKeys);
+        $canonical = Canonicalizer::fromRequest($request, (string) $ts, (string) $nonce, $stripKeys, $this->isMultipart($request));
 
         if (! $this->bridge->verifyRequest($canonical, $sig, $request, $keyChain)) {
             if ($this->bridge->config('debug', false)) {
@@ -197,6 +216,10 @@ class SecureBridgeMiddleware
 
     protected function decryptInbound($request, $keyChain)
     {
+        if ($this->isMultipart($request)) {
+            return null; // file uploads are never JSON-enveloped
+        }
+
         if (! in_array($request->getMethod(), array('POST', 'PUT', 'PATCH', 'DELETE'), true)) {
             return null;
         }
