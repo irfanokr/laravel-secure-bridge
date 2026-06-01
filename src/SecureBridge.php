@@ -375,11 +375,15 @@ class SecureBridge
      * Whether the request has the key material it needs. Returns null when
      * ready, or array(status, message, code) describing what is missing.
      */
-    public function readinessError($request, KeyChain $keyChain)
+    public function readinessError($request, KeyChain $keyChain, $signing = null, $encrypting = null)
     {
         $source = $this->keySource();
-        $signing = (bool) $this->config('sign_requests', true);
-        $encrypting = (bool) $this->config('encrypt_request', false) || (bool) $this->config('encrypt_response', false);
+        if ($signing === null) {
+            $signing = (bool) $this->config('sign_requests', true);
+        }
+        if ($encrypting === null) {
+            $encrypting = (bool) $this->config('encrypt_request', false) || (bool) $this->config('encrypt_response', false);
+        }
         $ecdsa = $this->signatureDriverName() === 'ecdsa';
 
         if ($signing && $ecdsa) {

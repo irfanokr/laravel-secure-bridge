@@ -4,6 +4,7 @@ namespace Irfanokr\SecureBridge\Http\Middleware;
 
 use Closure;
 use Illuminate\Contracts\Container\Container;
+use Irfanokr\SecureBridge\Events\RequestBlocked;
 use Irfanokr\SecureBridge\SecureBridge;
 use Irfanokr\SecureBridge\Support\Canonicalizer;
 use Irfanokr\SecureBridge\Support\ReplayGuard;
@@ -30,37 +31,52 @@ class SecureBridgeMiddleware
     /** @var ReplayGuard|null */
     protected $replayGuard;
 
+    /** @var \Illuminate\Http\Request|null current request, for event context */
+    protected $request;
+
     public function __construct(SecureBridge $bridge, Container $container)
     {
         $this->bridge = $bridge;
         $this->container = $container;
     }
 
-    public function handle($request, Closure $next)
+    /**
+     * @param  string ...$options per-route feature selection, e.g.
+     *   Route::middleware('secure-bridge:sign')                 // sign only
+     *   Route::middleware('secure-bridge:sign,encrypt-response')
+     *   Route::middleware('secure-bridge:encrypt')             // both directions
+     *   Route::middleware('secure-bridge:all,https')
+     * When no options are given, the config toggles apply.
+     */
+    public function handle($request, Closure $next, ...$options)
     {
+        $this->request = $request;
+
         if ($this->shouldBypass($request)) {
             return $next($request);
         }
 
-        if ($this->bridge->config('require_https', false) && ! $this->isSecure($request)) {
+        $opt = $this->resolveOptions($options);
+
+        if ($opt['https'] && ! $this->isSecure($request)) {
             return $this->fail(400, 'HTTPS is required.', 'insecure_transport');
         }
 
         $keyChain = $this->bridge->keyChainForRequest($request);
 
-        $readiness = $this->bridge->readinessError($request, $keyChain);
+        $readiness = $this->bridge->readinessError($request, $keyChain, $opt['sign'], $opt['encReq'] || $opt['encRes']);
         if ($readiness !== null) {
             return $this->fail($readiness[0], $readiness[1], $readiness[2]);
         }
 
-        if ($this->bridge->config('sign_requests', true)) {
+        if ($opt['sign']) {
             $error = $this->verifyInbound($request, $keyChain);
             if ($error !== null) {
                 return $error;
             }
         }
 
-        if ($this->bridge->config('encrypt_request', false)) {
+        if ($opt['encReq']) {
             $error = $this->decryptInbound($request, $keyChain);
             if ($error !== null) {
                 return $error;
@@ -69,11 +85,64 @@ class SecureBridgeMiddleware
 
         $response = $next($request);
 
-        if ($this->bridge->config('encrypt_response', false)) {
+        if ($opt['encRes']) {
             $this->encryptOutbound($response, $keyChain);
         }
 
         return $response;
+    }
+
+    /**
+     * Resolve which features apply: explicit middleware parameters (an allow
+     * list — anything not named is OFF) or, when none are given, the config.
+     */
+    protected function resolveOptions(array $params)
+    {
+        $cfgHttps = (bool) $this->bridge->config('require_https', false);
+
+        if (empty($params)) {
+            return array(
+                'sign'   => (bool) $this->bridge->config('sign_requests', true),
+                'encReq' => (bool) $this->bridge->config('encrypt_request', false),
+                'encRes' => (bool) $this->bridge->config('encrypt_response', false),
+                'https'  => $cfgHttps,
+            );
+        }
+
+        $opt = array('sign' => false, 'encReq' => false, 'encRes' => false, 'https' => $cfgHttps);
+
+        foreach ($params as $param) {
+            switch (strtolower(trim($param))) {
+                case 'sign':
+                    $opt['sign'] = true;
+                    break;
+                case 'encrypt-request':
+                case 'encrypt-req':
+                    $opt['encReq'] = true;
+                    break;
+                case 'encrypt-response':
+                case 'encrypt-res':
+                    $opt['encRes'] = true;
+                    break;
+                case 'encrypt':
+                    $opt['encReq'] = true;
+                    $opt['encRes'] = true;
+                    break;
+                case 'all':
+                    $opt['sign'] = true;
+                    $opt['encReq'] = true;
+                    $opt['encRes'] = true;
+                    break;
+                case 'https':
+                    $opt['https'] = true;
+                    break;
+                case 'no-https':
+                    $opt['https'] = false;
+                    break;
+            }
+        }
+
+        return $opt;
     }
 
     // -- Skip rules --------------------------------------------------------
@@ -314,6 +383,13 @@ class SecureBridgeMiddleware
      */
     protected function fail($status, $message, $code)
     {
+        // Observability: let apps log/alert on rejections (no payload leaked).
+        if ($this->request !== null
+            && $this->bridge->config('events', true)
+            && function_exists('event')) {
+            event(new RequestBlocked($this->request, $status, $code, $message));
+        }
+
         return response()->json(array(
             'error'        => $message,
             'code'         => $code,

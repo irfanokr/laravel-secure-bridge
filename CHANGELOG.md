@@ -3,6 +3,20 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.4.0] - 2026-06-01
+
+### Added
+- **Per-route feature selection via middleware parameters.** Apply only the
+  features a route needs — `secure-bridge:sign`, `secure-bridge:sign,encrypt-response`,
+  `secure-bridge:encrypt,https`, `secure-bridge:all`, etc. Anything not named is
+  off; no parameters falls back to the config toggles.
+- **Observability event** `Irfanokr\SecureBridge\Events\RequestBlocked`,
+  dispatched on every rejection (metadata only, never the payload) — listen to
+  log/alert. Toggle with the `events` config.
+- **docs/EXAMPLES.md** — copy-paste working code for plain AJAX (fetch + jQuery),
+  file uploads, the token handshake, and Angular (class + functional interceptor
+  + handshake-after-login service).
+
 ## [1.3.0] - 2026-06-01
 
 ### Changed / Fixed (hardening)

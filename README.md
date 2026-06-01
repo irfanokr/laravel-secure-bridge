@@ -79,6 +79,17 @@ Route::middleware('secure-bridge')->group(function () {
 });
 ```
 
+**Per-route feature selection** — pick exactly which features apply on a route (anything not named is off), so a developer can enable some and skip others:
+
+```php
+Route::middleware('secure-bridge:sign')->post('/api/login', ...);              // sign only
+Route::middleware('secure-bridge:sign,encrypt-response')->get('/api/me', ...); // sign + encrypt response
+Route::middleware('secure-bridge:encrypt,https')->post('/api/secret', ...);    // encrypt both + require HTTPS
+Route::middleware('secure-bridge:all')->post('/api/transfer', ...);            // everything
+```
+
+Tokens: `sign`, `encrypt-request`, `encrypt-response`, `encrypt`, `all`, `https`, `no-https`. With no token it uses the config defaults. See **[docs/EXAMPLES.md](docs/EXAMPLES.md)** for copy-paste AJAX and Angular code.
+
 Or globally (and scope it with the `only`/`except` config):
 
 ```php
@@ -158,6 +169,7 @@ That injects the client and a **per-session** key, and auto-wires `window.fetch`
 | `require_https` | `SECURE_BRIDGE_REQUIRE_HTTPS` | `false` | Reject non-HTTPS requests (localhost exempt). |
 | `session_key.enabled` | `SECURE_BRIDGE_SESSION_KEY` | `false` | Per-session keys for Blade apps. |
 | `debug` | `SECURE_BRIDGE_DEBUG` | `false` | Log *why* a signature failed (dev only). |
+| `events` | `SECURE_BRIDGE_EVENTS` | `true` | Dispatch a `RequestBlocked` event on every rejection (for logging/alerting). |
 
 ---
 

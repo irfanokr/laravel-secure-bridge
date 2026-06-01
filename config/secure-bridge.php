@@ -254,6 +254,13 @@ return [
     'debug' => (bool) env('SECURE_BRIDGE_DEBUG', false),
 
     /*
+    | Dispatch an Irfanokr\SecureBridge\Events\RequestBlocked event whenever a
+    | request is rejected, so you can log/alert (the event carries metadata
+    | only, never the payload). Set false to disable.
+    */
+    'events' => (bool) env('SECURE_BRIDGE_EVENTS', true),
+
+    /*
     |--------------------------------------------------------------------------
     | Wire format — header & query parameter names (v1)
     |--------------------------------------------------------------------------
