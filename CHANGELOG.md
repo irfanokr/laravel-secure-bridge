@@ -3,7 +3,7 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.0.0] - 2026-06-01
 
 ### Added
 - Initial release.
