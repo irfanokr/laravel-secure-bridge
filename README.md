@@ -122,31 +122,44 @@ Install the client once:
 npm install secure-bridge-client
 ```
 
-Then, **right after your login succeeds**, do two things — and that's it:
+Then, **whenever your app has a logged-in user, do two things** — once at login, and again on every page load:
 
 ```js
 import SecureBridge from 'secure-bridge-client';
 
-// 1. Ask the server once for this session's key (the "handshake"):
-await SecureBridge.handshake('/secure-bridge/handshake', {
-  headers: { Authorization: 'Bearer ' + token },   // the token your login returned
-});
-
-// 2. Turn on signing for EVERY request your app makes — now and forever after:
-SecureBridge.install();
+async function startSecureBridge(token) {        // `token` = your app's normal login token
+  // 1. Ask the server for this session's signing key (the "handshake"):
+  await SecureBridge.handshake('/secure-bridge/handshake', {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  // 2. Turn on signing for EVERY request your app makes:
+  SecureBridge.install();
+}
 ```
 
 That single `SecureBridge.install()` is the whole point. It hooks the browser's request machinery (`fetch` **and** `XMLHttpRequest`). **It does not matter how your app sends requests** — `fetch`, `axios`, `jQuery`, and even **Angular's `HttpClient`** all run on top of those two, so every one of them is signed automatically. **You never touch your request code** — there is nothing to change across your screens, no matter how many requests you have.
 
-**Where do those lines go?**
+> ### ⚠️ Important: page reloads — read this
+> The signing key is kept in **memory only** (a JavaScript variable). The package **never** puts it in `localStorage`, `sessionStorage`, or a cookie, because anything there can be read by any script (XSS) and lingers after the session — that would defeat the security.
+>
+> So a **page reload wipes the key.** What survives a reload is *your own login token* (the cookie or storage your app already uses for auth) — **not** anything from this package. The fix is simple: **call `startSecureBridge(token)` at app startup too**, not only on the login click. A reload just re-runs it and gets a fresh key. If a request fires before that finishes, the server replies **`412 handshake_required`** — catch it, call `handshake()` again, and retry.
+>
+> (This only applies to the separate-app `token` mode. The Blade setup (A) doesn't have it — the server injects a fresh key into every page render — and `static` mode keeps the key in the code.)
 
-- **React / Vue / Svelte:** in your login-success handler (or at app startup, once you have the token).
-- **Angular:** the same — in your auth service after login. `install()` covers `HttpClient` by itself; you do **not** need an Angular interceptor.
-- **Plain HTML, no build tools:** load the client with one tag, then call the same two lines:
+**Where do those calls go?**
+
+- **React / Vue / Svelte:** call `startSecureBridge(token)` in your login handler **and** in your app's bootstrap/root effect that runs on load (when a saved token exists).
+- **Angular:** the same — in your auth service after login, and in an `APP_INITIALIZER` (or your root component) on startup. `install()` covers `HttpClient` by itself; you do **not** need an Angular interceptor.
+- **Plain HTML, no build tools:** load the client with one tag, then run it both after login and on page load:
 
   ```html
   <script src="https://unpkg.com/secure-bridge-client"></script>
   <script>
+    async function startSecureBridge(token) {
+      await SecureBridge.handshake('/secure-bridge/handshake', { headers: { Authorization: 'Bearer ' + token } });
+      SecureBridge.install();   // every fetch / XHR from now on is signed
+    }
+
     async function login(email, password) {
       const res = await fetch('/api/login', {
         method: 'POST',
@@ -154,14 +167,17 @@ That single `SecureBridge.install()` is the whole point. It hooks the browser's 
         body: JSON.stringify({ email, password }),
       });
       const { token } = await res.json();
-
-      await SecureBridge.handshake('/secure-bridge/handshake', { headers: { Authorization: 'Bearer ' + token } });
-      SecureBridge.install();   // every fetch / XHR from now on is signed
+      localStorage.setItem('auth_token', token);   // YOUR login token persists (your choice)
+      await startSecureBridge(token);
     }
+
+    // On every page load, if already logged in, re-fetch a fresh key:
+    window.addEventListener('load', function () {
+      const token = localStorage.getItem('auth_token');
+      if (token) { startSecureBridge(token); }
+    });
   </script>
   ```
-
-If a request ever comes back **`412 handshake_required`** (the key expired), just call `SecureBridge.handshake(...)` again and retry.
 
 > **Only if you turn on response encryption** (`encrypt_response`): decrypted replies are applied automatically for `fetch`; for `XMLHttpRequest`-based requests (axios / jQuery / Angular) call `SecureBridge.processResponse(reply)` in your handler. Plain signing always works everywhere with nothing extra.
 
