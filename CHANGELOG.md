@@ -3,6 +3,21 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.5.2] - 2026-06-02
+
+### Documentation
+- **Documented how it works with existing auth (JWT / Sanctum / Passport / sessions).**
+  The signing key binds to the bearer token, and `handshake.middleware` takes *your*
+  guard (`auth:api`, `jwt.auth`, etc.), so each request carries both your
+  `Authorization` (checked by your auth) and the signature (checked by this package)
+  as two independent layers. Noted that token refresh/rotation yields a one-off
+  `412` → re-handshake with the new token.
+- **Documented signing pre-login Blade AJAX** (login / forgot-password / register).
+  In session mode the key lives in the (guest) session, so those forms are signed as
+  long as the page renders `@secureBridge`; the key carries over the post-login
+  session-id regeneration. Clarified: apply to web routes (which have a session), and
+  it's in addition to CSRF, not a replacement.
+
 ## [1.5.1] - 2026-06-02
 
 ### Documentation (a full, coherent rewrite)

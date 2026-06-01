@@ -65,6 +65,20 @@ async function apiFetch(url, init, token) {
 
 ---
 
+## Works with your existing auth (JWT, Sanctum, Passport, sessions)
+
+This package is **independent of how you authenticate** — it layers on top.
+
+- Set `handshake.middleware` (server config) to **your** guard: `auth:sanctum`, `auth:api` (JWT), `jwt.auth` (tymon/jwt-auth), Passport, etc. That guard is what protects the handshake endpoint.
+- The handshake binds the signing key to the **bearer token** you send it. So after login, every request carries two things:
+  - `Authorization: Bearer <token>` — checked by **your** auth guard, and
+  - the `X-Sig` signature — checked by **this package**.
+
+  They're two independent layers; the order they run in doesn't matter, and this package never touches your auth.
+- **Token refresh / rotation (common with JWT):** when the bearer token changes, the key bound to the *old* token no longer matches, so the next request returns `412 handshake_required`. Re-run `startSecureBridge(newToken)` and retry — the `apiFetch` wrapper above already does this. (Do the handshake again right after you refresh the token, and there's no gap.)
+
+---
+
 ## Where the two calls go, per framework
 
 The signing itself is automatic after `install()`. All you wire per framework is **where** `startSecureBridge(token)` runs (login + startup).

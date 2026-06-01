@@ -117,6 +117,13 @@ Route::get('/', [HomeController::class, 'index']);
 2. In the browser, open **DevTools → Network**, trigger a request, click it, and look at its **Request Headers**. You should see **`X-Sig`**, **`X-Timestamp`** and **`X-Nonce`** — that means it's signed. ✅
 3. On `localhost` you need nothing extra. In production, serve over **HTTPS** (and you can enforce it with `SECURE_BRIDGE_REQUIRE_HTTPS=true`).
 
+#### What about login / forgot-password / register (before the user is logged in)?
+
+These AJAX forms work too — and you don't need a token. In Blade mode the signing key lives in the Laravel **session**, which exists for **guests** as well. As long as those pages render `@secureBridge` (use your shared layout, or add the line to each view), their `POST`s are signed with the guest-session key and verified the same way. After a successful login Laravel regenerates the session id and the key **carries over**, so your authenticated requests keep working. Two notes:
+
+- In this mode apply `secure-bridge` to **web routes** (they have a session), not `api` routes; it runs after Laravel's session middleware automatically.
+- This is *in addition to* Laravel's CSRF protection, not a replacement. (Prefer not to sign pre-login routes? Add them to the `except` list instead.)
+
 ---
 
 <a id="setup-b"></a>
@@ -162,6 +169,8 @@ php artisan vendor:publish --tag=secure-bridge-config
 ],
 'except' => ['api/login', 'api/register', 'secure-bridge/handshake'],
 ```
+
+> **Works with any auth — JWT, Sanctum, Passport, sessions.** Put **your** guard in `handshake.middleware` — `auth:sanctum`, `auth:api` (JWT), `jwt.auth` (tymon/jwt-auth), Passport, etc. The signing key is bound to the **bearer token** the client sends, so after login every request carries both your `Authorization: Bearer …` (checked by *your* auth) **and** the `X-Sig` signature (checked by this package) — two independent layers that compose; middleware order doesn't matter. If your token is **refreshed/rotated** (common with JWT), the next request returns `412 handshake_required` — just re-handshake with the new token and retry.
 
 #### Step 2 — your front-end (any framework)
 
