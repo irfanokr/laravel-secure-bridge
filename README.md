@@ -14,6 +14,8 @@ It ships with a **framework-agnostic JavaScript client** (`fetch`, `axios`, `jQu
 
 Standard, audited primitives only — AES-256-GCM via `openssl`/Web Crypto and HMAC-SHA256. No hand-rolled ciphers.
 
+> 🟢 **New to this / want the shortest path?** Start with the **[5-minute beginner guide → docs/QUICKSTART.md](docs/QUICKSTART.md)**. It walks you through the simplest working setup in plain language — no crypto knowledge needed. Come back here for the details.
+
 ---
 
 ## Threat model — read this first
@@ -32,15 +34,15 @@ This is the section every comparable package leaves out, and it is the most impo
 | **Payload exposure** in server logs, APM/observability tools, browser extensions, and TLS-terminating corporate proxies | AES-256-GCM end-to-end between browser and PHP |
 | Accidental misuse of endpoints by tools that skip the handshake | Rejected with a clear error |
 
-**What it does NOT protect against:**
+**What it does NOT *fully* stop — and how the package shrinks each gap:**
 
-| ❌ Does not stop | Why |
-|---|---|
-| A determined attacker who reads your JS bundle | The static key is right there — they can sign/encrypt too |
-| Anything TLS already covers | This is **defense-in-depth**, not a replacement for HTTPS |
-| A compromised browser / XSS on your own site | The key lives in the page; XSS can use it |
+| ❌ Limitation | Why it exists | ✅ How the package reduces it |
+|---|---|---|
+| A **static key** in a downloadable bundle isn't secret | It's right there in the JS — anyone can read and reuse it | Don't ship a static key. Use `key_source=token` (the key never enters the bundle and is different per session) or `session` (Blade). With `signature_driver=ecdsa` the signing key is **non-extractable** — it can't be read or copied out *at all*. |
+| Anything **TLS already covers** | This is **defense-in-depth**, not a replacement for HTTPS | Keep HTTPS on (`require_https=true`). This layer *adds to* TLS; it never replaces it. |
+| **XSS on your own site** — injected script can *use* whatever the open page can | Attacker script runs with your page's privileges while the page is open | Signing can't cure XSS, but the package narrows it: (a) the bundled **CSP + Trusted Types** helper *prevents* most XSS; (b) `ecdsa` non-extractable keys mean injected script can't *steal* the key for offline/replay reuse; (c) short key TTL + a **BFF** shrink the window further. Full playbook → [docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md). |
 
-**It is therefore a hardening / anti-tampering / anti-automation / log-hygiene layer — never your authentication or authorization.** Keep using real auth (Sanctum, Passport, JWT, session cookies) underneath it.
+**Bottom line:** it's a hardening / anti-tampering / anti-automation / log-hygiene layer — **never** your authentication or authorization. Keep real auth (Sanctum, Passport, JWT, session cookies) underneath it.
 
 ### Making signing genuinely meaningful
 

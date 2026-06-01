@@ -3,6 +3,20 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.4.1] - 2026-06-01
+
+### Documentation
+- **New beginner guide `docs/QUICKSTART.md`** — a plain-language, no-crypto-knowledge
+  walkthrough: pick-your-situation table, three copy-paste setups (Blade / decoupled
+  SPA / static), a "how do I know it's working" check, and a friendly error-message
+  reference (with the real response codes).
+- **Threat-model table now reflects the mitigations.** The README "what it does NOT
+  protect against" section previously read as flat limitations; it now shows, per row,
+  how the package shrinks each gap (token/session key sources and non-extractable
+  ECDSA keys for the bundle-key problem; the bundled CSP + Trusted Types helper and
+  non-extractable keys for XSS). No security claim changed — the docs just stopped
+  understating what already ships.
+
 ## [1.4.0] - 2026-06-01
 
 ### Added
