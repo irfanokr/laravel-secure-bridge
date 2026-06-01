@@ -2,6 +2,21 @@
 
 This is the most important document in the package. Read it before you ship.
 
+## In 30 seconds
+
+**What this protects:** nobody can change a request on its way to the server, nobody can replay a captured request, and simple bots that don't run your code can't make valid requests. With encryption on, the contents are also hidden from logs, proxies and browser extensions.
+
+**What it does NOT do:** it does **not** replace HTTPS or your login — keep both — and it **cannot** protect a page that is already running an attacker's injected script (XSS); see [Handling XSS](#handling-xss). A key sitting in downloadable JavaScript is **not secret** — so the real question is *where your key lives*, which is what this document is about.
+
+## Which key source should I use? (quick decision)
+
+- **Laravel Blade pages (same site)** → **`session`**. The `@secureBridge` directive injects a fresh key into each page; nothing to manage. → [README → Setup A](../README.md#setup-a).
+- **A separate React/Angular/Vue app with a login** → **`token`** (recommended). The server hands the browser a per-session key after login (the handshake); no key in your code. → [README → Setup B](../README.md#setup-b).
+- **No login — internal tool / just anti-tampering** → **`static`**. A key baked into your code: simple, but visible to anyone, so never for anything sensitive.
+- **Highest security / regulated** → **BFF**. A small server holds the key; the browser never has one.
+
+The rest of this document explains each in depth and how to harden against XSS.
+
 ## The problem, stated plainly
 
 A single-page app (React, Angular, Vue, …) is a **public client**. Everything it ships — every line of JavaScript, every constant — is downloaded to the browser and can be read by anyone who opens DevTools. **A key hard-coded into your SPA bundle is not a secret.** An attacker can extract it and produce perfectly valid signatures and ciphertext.
@@ -118,6 +133,7 @@ If you cannot accept *any* browser-held secret, put a thin server-side **Backend
 
 In this model the signing layer runs **server-to-server** (use `key_source=static` between BFF and API, both servers, key truly secret), and the browser never holds a usable secret at all.
 
+<a id="handling-xss"></a>
 ## Handling XSS / injected scripts ("a script run from the console / network")
 
 First, separate two things people lump together:
@@ -129,12 +145,12 @@ So the strategy is two layers: **prevent the injection**, and **limit the blast 
 
 ### Layer 1 — Prevent injection (the only real cure)
 - **Strict Content-Security-Policy** with a nonce/hash-based `script-src` — blocks injected and inline scripts. ([web.dev strict-csp](https://web.dev/articles/strict-csp), [MDN CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP))
-- **Trusted Types** (`Content-Security-Policy: require-trusted-types-for 'script'`) — neutralizes DOM-XSS sinks. ([MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/require-trusted-types-for), [Chrome](https://developer.chrome.com/docs/lighthouse/best-practices/trusted-types-xss)) Chromium-only today, degrades gracefully.
+- **Trusted Types** (`Content-Security-Policy: require-trusted-types-for 'script'`) — blocks the risky DOM operations (like `innerHTML`) that injected scripts abuse. ([MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/require-trusted-types-for), [Chrome](https://developer.chrome.com/docs/lighthouse/best-practices/trusted-types-xss)) Chromium-only today, degrades gracefully.
 - **Use your framework's auto-escaping** and never bypass it (`innerHTML`, React `dangerouslySetInnerHTML`, Angular `bypassSecurityTrust*`). ([Angular security](https://angular.dev/best-practices/security))
 - **Dependency hygiene + Subresource Integrity** — most modern XSS arrives through a compromised package, not your own code.
 
 ### Layer 2 — Limit the damage if XSS still happens
-- **Non-extractable keys — built in.** Set `signature_driver=ecdsa` with `key_source=token`. The browser generates a non-extractable ECDSA P-256 `CryptoKey`, registers only the **public** key at handshake, and signs with a private key it can never export. Injected script can *use* the key while the page is open but **cannot exfiltrate** it for offline / long-term / replayed abuse — the IETF browser-apps BCP recommendation for DPoP. ([InfoQ](https://www.infoq.com/articles/dpop-key-storage-unsolved-problem/))
+- **Non-extractable keys — built in.** Set `signature_driver=ecdsa` with `key_source=token`. The browser generates a non-extractable ECDSA P-256 `CryptoKey`, registers only the **public** key at handshake, and signs with a private key it can never export. Injected script can *use* the key while the page is open but **cannot exfiltrate** it (copy it out) for offline / long-term / replayed abuse — this "key the browser can use but JS can't read" approach is the same one the IETF recommends for token binding (DPoP). ([InfoQ](https://www.infoq.com/articles/dpop-key-storage-unsolved-problem/))
   ```env
   SECURE_BRIDGE_KEY_SOURCE=token
   SECURE_BRIDGE_HANDSHAKE=true

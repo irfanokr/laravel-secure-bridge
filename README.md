@@ -69,17 +69,53 @@ This is the Blade file that has your `<html>`, `<head>` and `<body>` — usually
 
 *Using jQuery?* Just make sure your jQuery `<script>` line sits **above** `@secureBridge`.
 
-**4. Choose what to protect** in `routes/web.php`:
+**4. Choose which routes to protect** in `routes/web.php`. Put the routes whose requests you want signed *inside* the group; anything **outside keeps working exactly as before** (no signing needed):
 
 ```php
+// Protected — requests to these must be signed:
 Route::middleware('secure-bridge')->group(function () {
-    // put the routes you want protected inside here
+    Route::post('/profile', [ProfileController::class, 'update']);
+    Route::get('/orders', [OrderController::class, 'list']);
 });
+
+// Not protected — works normally:
+Route::get('/', [HomeController::class, 'index']);
 ```
 
-**Done.** Every request your pages already make — `fetch`, jQuery, axios, or `XMLHttpRequest` — is now signed automatically. You did not change any JavaScript.
+**Done.** Every request your Blade pages already make — `fetch`, jQuery, axios, `XMLHttpRequest` — is now signed automatically. You did not change any JavaScript.
 
-To confirm it's working, run **`php artisan secure-bridge:doctor`**.
+#### A complete example page (copy-paste)
+
+```blade
+{{-- resources/views/layouts/app.blade.php --}}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My App</title>
+    @secureBridge   {{-- the one line you add --}}
+</head>
+<body>
+    <button onclick="saveName()">Save</button>
+    <script>
+      async function saveName() {
+        // ordinary fetch — already signed; you write nothing special:
+        const res = await fetch('/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Ali' }),
+        });
+        console.log(await res.json());
+      }
+    </script>
+</body>
+</html>
+```
+
+#### Did it work?
+
+1. Run **`php artisan secure-bridge:doctor`** — it prints your settings and a sample signature. If it lists your key and `signature_driver`, the server side is ready.
+2. In the browser, open **DevTools → Network**, trigger a request, click it, and look at its **Request Headers**. You should see **`X-Sig`**, **`X-Timestamp`** and **`X-Nonce`** — that means it's signed. ✅
+3. On `localhost` you need nothing extra. In production, serve over **HTTPS** (and you can enforce it with `SECURE_BRIDGE_REQUIRE_HTTPS=true`).
 
 ---
 
@@ -104,7 +140,7 @@ SECURE_BRIDGE_KEY_SOURCE=token
 SECURE_BRIDGE_HANDSHAKE=true
 ```
 
-Protect your API routes in `routes/api.php`, but leave your **login** route out of the group (it has no key yet):
+Protect your API routes in `routes/api.php` — keep your **login** route out of the group (it has no key yet):
 
 ```php
 Route::middleware('secure-bridge')->group(function () {
@@ -112,7 +148,20 @@ Route::middleware('secure-bridge')->group(function () {
 });
 ```
 
-(The small handshake config — which login guard protects it, which routes to skip — is in [docs/SECURING-THE-KEY.md → Server setup](docs/SECURING-THE-KEY.md#server-setup).)
+Then publish the config and set, in **one place**, which guard protects the handshake and which routes to skip:
+
+```bash
+php artisan vendor:publish --tag=secure-bridge-config
+```
+```php
+// config/secure-bridge.php
+'handshake' => [
+    'enabled'    => true,
+    'route'      => 'secure-bridge/handshake',
+    'middleware' => ['auth:sanctum'],   // 👈 YOUR login guard
+],
+'except' => ['api/login', 'api/register', 'secure-bridge/handshake'],
+```
 
 #### Step 2 — your front-end (any framework)
 
@@ -150,7 +199,7 @@ That single `SecureBridge.install()` is the whole point. It hooks the browser's 
 >
 > (This only applies to the separate-app `token` mode. The Blade setup (A) doesn't have it — the server injects a fresh key into every page render — and `static` mode keeps the key in the code.)
 
-**Where do those calls go?**
+**Where do those calls go?** Complete copy-paste code for each framework — including the on-reload wiring and the `412` retry — is in **[docs/INTEGRATION.md](docs/INTEGRATION.md)**. In short:
 
 - **React / Vue / Svelte:** call `startSecureBridge(token)` in your login handler **and** in your app's bootstrap/root effect that runs on load (when a saved token exists).
 - **Angular:** the same — in your auth service after login, and in an `APP_INITIALIZER` (or your root component) on startup. `install()` covers `HttpClient` by itself; you do **not** need an Angular interceptor.
@@ -305,11 +354,12 @@ Publish the config file with `php artisan vendor:publish --tag=secure-bridge-con
 
 | Code you see | What it means | What to do |
 |---|---|---|
-| `412 handshake_required` | (separate-app setup) the browser hasn't got its key yet, or it expired | call `SecureBridge.handshake(...)` again, then retry |
-| `400 missing_signature` | the route is protected but the request wasn't signed | make sure `@secureBridge` (or `installFetch()`) actually ran |
+| `412 handshake_required` | (separate-app setup) the browser hasn't got its key yet, or it expired — often right after a **page reload** | call `SecureBridge.handshake(...)` again, then retry the request |
+| `400 missing_signature` | the route is protected but the request wasn't signed | make sure `@secureBridge` (Blade) or `SecureBridge.install()` (separate app) actually ran before the request |
 | `400 invalid_signature` | the fingerprint didn't match | for jQuery/axios **GET**s, put the query values in the URL, not a separate `data`/`params` object |
 | `400 stale_timestamp` | the device clock is more than 5 minutes off | fix the clock, or raise `SECURE_BRIDGE_WINDOW` |
-| `409 replay` | the same request was sent twice | each request can only be used once — don't resend it |
+| `409 replay` | the same signed request was sent twice | each request can only be used once — don't resend the identical one |
+| handshake route returns `401`/`404` | the handshake endpoint isn't reachable or your guard rejected it | confirm `SECURE_BRIDGE_HANDSHAKE=true`, the `handshake.middleware` guard matches your login, and the route isn't blocked |
 
 Tip: set `SECURE_BRIDGE_DEBUG=true` while developing and the log tells you exactly what went wrong.
 </details>
@@ -338,6 +388,48 @@ SECURE_BRIDGE_SIGNATURE_DRIVER=ed25519
 ```
 
 Implement `Irfanokr\SecureBridge\Contracts\SignatureDriver` or `EncryptionDriver`.
+</details>
+
+<details>
+<summary><b>Log or alert when a request is blocked (observability)</b></summary>
+
+Every rejection fires an event (metadata only — never the payload). Listen for it to log or alert:
+
+```php
+use Irfanokr\SecureBridge\Events\RequestBlocked;
+use Illuminate\Support\Facades\Event;
+
+Event::listen(RequestBlocked::class, function (RequestBlocked $e) {
+    logger()->warning('SecureBridge blocked a request', [
+        'code'   => $e->code,    // e.g. missing_signature, replay
+        'status' => $e->status,  // e.g. 400, 409, 412
+        'ip'     => $e->request->ip(),
+        'path'   => $e->request->path(),
+    ]);
+});
+```
+
+Toggle with the `events` config (on by default).
+</details>
+
+<details>
+<summary><b>Glossary — the words in this README, in plain English</b></summary>
+
+| Word | Plain meaning |
+|---|---|
+| **Signature / "fingerprint"** | A short code attached to each request (the `X-Sig` header) that the server recomputes to check the request is genuine and unchanged. |
+| **Sign a request** | Attach that fingerprint so the server will accept it. |
+| **Handshake** | One request your app makes after login to get its signing key from the server. |
+| **Per-session key** | A signing key that's different for every logged-in session and is thrown away when the session ends. |
+| **Nonce** | A random value used once per request, so a captured request can't be replayed later. |
+| **Timestamp window** | How far the device clock may differ from the server (default 5 min) before a request is rejected. |
+| **Canonical string** | The exact text (method + path + query + timestamp + nonce + body) that both sides build identically to compute/verify the signature. |
+| **HMAC** | The normal signing method — one shared key signs and verifies. |
+| **ECDSA (non-extractable key)** | A stronger option: the browser holds a key it can *use* but JavaScript can never read or copy out (so even malicious script can't steal it). |
+| **Encryption (AES-256-GCM)** | Optional scrambling of the request/response contents so onlookers (logs, proxies, extensions) can't read them. |
+| **`install()`** | The one client call that turns on signing for every request your app makes. |
+| **BFF (Backend-for-Frontend)** | An optional small server between your browser and API so the key never lives in the browser at all — the highest-security setup. |
+| **Multipart (signed "body-less")** | File uploads are still signed, but the file bytes themselves aren't part of the signature (the browser controls that format). |
 </details>
 
 ---

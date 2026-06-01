@@ -3,6 +3,33 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.5.1] - 2026-06-02
+
+### Documentation (a full, coherent rewrite)
+- The docs were fragmented across six files that repeated and sometimes
+  contradicted each other, with no single "zero-to-working" path. Reworked into
+  **one coherent set**:
+  - **README** now carries a *complete, self-contained* path for each user type:
+    Setup A (Blade) gains a full copy-paste page, a "what to protect / unprotected
+    routes still work" example, and a **"Did it work?"** check (look for `X-Sig`
+    in DevTools); Setup B gets the server config consolidated into one block.
+    Added a plain-English **Glossary**, a **"log when blocked"** recipe, and an
+    expanded refusal-codes table. Fixed the `installFetch()` vs `install()` and
+    HTTPS-wording inconsistencies.
+  - **docs/INTEGRATION.md** rewritten around the **token handshake + `install()`**
+    (the recommended path) instead of a static key: the handshake/reload/`412`
+    pattern is explained **once**, then each framework (React, Vue, Angular,
+    Svelte, plain JS, Node, jQuery) shows only *where* the two calls go. The
+    Angular interceptor is now clearly the *response-decryption* option, not a
+    requirement. `static` mode is a clearly-labelled "anti-tampering only" section.
+  - **docs/SECURING-THE-KEY.md** gains a 30-second "protects / does not" summary
+    and a key-source **decision tree** at the top; jargon (Trusted Types, DPoP)
+    explained in plain words.
+  - **docs/EXAMPLES.md removed** — its content folded into the README and
+    INTEGRATION.md so there is one place per topic (no more drift).
+  - **client/README.md** trimmed to a short pointer (no duplicated setup).
+- No code or behaviour change.
+
 ## [1.5.0] - 2026-06-01
 
 ### Added — one call signs everything, no code changes

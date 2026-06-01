@@ -1,10 +1,8 @@
 # secure-bridge-client
 
-Framework-agnostic browser client for [`irfanokr/laravel-secure-bridge`](https://github.com/irfanokr/laravel-secure-bridge).
+Framework-agnostic browser client for [`irfanokr/laravel-secure-bridge`](https://github.com/irfanokr/laravel-secure-bridge) — request signing (HMAC-SHA256 / ECDSA, timestamp + nonce) and optional AES-256-GCM encryption, over the **Web Crypto API**. No dependencies. Works with `fetch`, `XMLHttpRequest`, `axios`, `jQuery`, and Angular / React / Vue / Svelte.
 
-It implements the **v1 wire format** — HMAC-SHA256 request signing (timestamp + nonce) and AES-256-GCM payload encryption — using the **Web Crypto API**. No dependencies. Works with `fetch`, `axios`, `jQuery`, and any SPA framework (Angular / React / Vue).
-
-> ⚠️ **Read the threat model** in the [main README](https://github.com/irfanokr/laravel-secure-bridge#threat-model) before relying on this. A key shipped in a public SPA bundle is **not secret** — this layer is defense-in-depth on top of HTTPS, not a replacement for it.
+> ⚠️ A key shipped in public JavaScript is **not secret**. This is defense-in-depth on top of HTTPS and your login — not a replacement. See the [security guide](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/SECURING-THE-KEY.md).
 
 ## Install
 
@@ -12,45 +10,30 @@ It implements the **v1 wire format** — HMAC-SHA256 request signing (timestamp 
 npm install secure-bridge-client
 ```
 
-Or, for a same-origin Laravel Blade app, publish the prebuilt UMD and use the `@secureBridge` Blade directive (no build step) — see the main README.
+## The one call
 
-## Quick start (fetch)
+Once your app has the signing key, **`SecureBridge.install()` signs every request your app makes** — `fetch`, `XMLHttpRequest`, axios, jQuery, Angular `HttpClient` — because it hooks `fetch` and `XMLHttpRequest`, which they all use underneath. You never change individual call sites.
+
+**Separate app with a login (recommended):** fetch a per-session key after login (the *handshake*), then `install()`:
 
 ```js
 import SecureBridge from 'secure-bridge-client';
 
-SecureBridge.configure({
-  key: 'BASE64_MASTER_KEY',   // the base64 part of SECURE_BRIDGE_KEY
-  sign: true,
-  encryptRequest: false,
-  encryptResponse: false,
+await SecureBridge.handshake('/secure-bridge/handshake', {
+  headers: { Authorization: 'Bearer ' + token },   // your app's login token
 });
-
-// Transparently sign every same-origin request and decrypt responses:
-SecureBridge.installFetch();
-
-const res = await fetch('/api/login', {
-  method: 'POST',
-  body: JSON.stringify({ username: 'demo' }),
-});
+SecureBridge.install();
 ```
 
-### axios / jQuery — also one line, existing calls unchanged
+Call this **at login and on every page load** — the key lives in memory, so a reload re-fetches it. If a request returns `412 handshake_required`, re-handshake and retry.
 
-```js
-SecureBridge.configure({ key: KEY, sign: true });
-SecureBridge.installAxios(axios);        // adds an axios interceptor
-SecureBridge.installJQuery(window.jQuery); // wraps $.ajax ($.get/$.post too)
-```
+**Same-origin Laravel Blade app:** you don't use this package directly — the `@secureBridge` Blade directive wires it for you.
 
-## Manual signing (one-off requests / unusual clients)
+## Full guides
 
-```js
-const { url, method, headers, body } = await SecureBridge.prepare('POST', '/api/login', { username: 'demo' });
-// -> send `body` with `headers` to `url` using whatever client you like
-```
-
-See **[docs/INTEGRATION.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/INTEGRATION.md)** for Angular / React / Vue / Svelte / Node setups, and the [main README](https://github.com/irfanokr/laravel-secure-bridge) for the full API and wire-format spec.
+- **Server + setup for your case** → [main README](https://github.com/irfanokr/laravel-secure-bridge#readme)
+- **Per-framework client code** (React / Angular / Vue / Svelte / Node / jQuery, with reload + 412 handling) → [docs/INTEGRATION.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/INTEGRATION.md)
+- **Key safety & threat model** → [docs/SECURING-THE-KEY.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/SECURING-THE-KEY.md)
 
 ## License
 
