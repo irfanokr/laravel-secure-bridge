@@ -1,0 +1,42 @@
+{
+    "name": "secure-bridge-client",
+    "version": "1.0.0",
+    "description": "Framework-agnostic browser client for irfanokr/laravel-secure-bridge: HMAC-SHA256 request signing (timestamp + nonce) and AES-256-GCM payload encryption over the Web Crypto API. Works with fetch, axios, jQuery, Angular, React and Vue.",
+    "keywords": [
+        "laravel",
+        "secure-bridge",
+        "hmac",
+        "request-signing",
+        "aes-gcm",
+        "encryption",
+        "web-crypto",
+        "fetch",
+        "axios",
+        "spa"
+    ],
+    "homepage": "https://github.com/irfanokr/laravel-secure-bridge",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/irfanokr/laravel-secure-bridge.git",
+        "directory": "client"
+    },
+    "license": "MIT",
+    "author": "irfanokr <irfanokr786@gmail.com>",
+    "main": "dist/secure-bridge.umd.js",
+    "module": "dist/secure-bridge.umd.js",
+    "unpkg": "dist/secure-bridge.umd.js",
+    "types": "dist/secure-bridge.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/secure-bridge.d.ts",
+            "default": "./dist/secure-bridge.umd.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "test": "node ../tests/interop/interop_node.js ../tests/interop/fixture.json ../tests/interop/node_env.txt"
+    },
+    "sideEffects": false
+}

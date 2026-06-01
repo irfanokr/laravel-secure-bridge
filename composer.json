@@ -1,0 +1,63 @@
+{
+    "name": "irfanokr/laravel-secure-bridge",
+    "description": "Signed, timestamped, replay-protected and optionally AES-256-GCM-encrypted request/response bridge between a JavaScript front-end (SPA or Blade + AJAX) and a Laravel API. Framework-agnostic JS client. Works on Laravel 5.5 through 12 and PHP 7.1+.",
+    "keywords": [
+        "laravel",
+        "security",
+        "hmac",
+        "request-signing",
+        "signature",
+        "encryption",
+        "aes-gcm",
+        "api",
+        "middleware",
+        "replay-protection",
+        "spa",
+        "anti-tampering"
+    ],
+    "homepage": "https://github.com/irfanokr/laravel-secure-bridge",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "irfanokr",
+            "email": "irfanokr786@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.1",
+        "ext-openssl": "*",
+        "ext-json": "*",
+        "illuminate/support": "^5.5 || ^6.0 || ^7.0 || ^8.0 || ^9.0 || ^10.0 || ^11.0 || ^12.0",
+        "illuminate/http": "^5.5 || ^6.0 || ^7.0 || ^8.0 || ^9.0 || ^10.0 || ^11.0 || ^12.0",
+        "illuminate/contracts": "^5.5 || ^6.0 || ^7.0 || ^8.0 || ^9.0 || ^10.0 || ^11.0 || ^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": ">=3.5",
+        "phpunit/phpunit": ">=6.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Irfanokr\\SecureBridge\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Irfanokr\\SecureBridge\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Irfanokr\\SecureBridge\\SecureBridgeServiceProvider"
+            ],
+            "aliases": {
+                "SecureBridge": "Irfanokr\\SecureBridge\\Facades\\SecureBridge"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

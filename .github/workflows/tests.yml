@@ -1,0 +1,72 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  php-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '7.4'
+            testbench: '^6.0'   # Laravel 8
+          - php: '8.0'
+            testbench: '^6.0'   # Laravel 8
+          - php: '8.1'
+            testbench: '^7.0'   # Laravel 9
+          - php: '8.2'
+            testbench: '^8.0'   # Laravel 10
+          - php: '8.3'
+            testbench: '^9.0'   # Laravel 11
+          - php: '8.3'
+            testbench: '^10.0'  # Laravel 12
+
+    name: PHP ${{ matrix.php }} / testbench ${{ matrix.testbench }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: openssl, json, mbstring
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          composer require "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update --dev
+          composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Run tests
+        run: vendor/bin/phpunit
+
+  interop:
+    runs-on: ubuntu-latest
+    name: PHP <-> JS interop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: openssl, json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run cross-language conformance harness
+        shell: bash
+        run: |
+          php tests/interop/interop_php.php emit > tests/interop/fixture.json
+          node tests/interop/interop_node.js tests/interop/fixture.json tests/interop/node_env.txt
+          DEC=$(php tests/interop/interop_php.php decrypt "$(cat tests/interop/node_env.txt)")
+          echo "PHP decrypted Node envelope: $DEC"
+          test "$DEC" = '{"username":"demo","pin":4321}'

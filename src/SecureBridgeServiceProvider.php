@@ -1,0 +1,86 @@
+<?php
+
+namespace Irfanokr\SecureBridge;
+
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\ServiceProvider;
+use Irfanokr\SecureBridge\Console\DoctorCommand;
+use Irfanokr\SecureBridge\Console\KeygenCommand;
+use Irfanokr\SecureBridge\Http\Middleware\SecureBridgeMiddleware;
+
+class SecureBridgeServiceProvider extends ServiceProvider
+{
+    public function register()
+    {
+        $this->mergeConfigFrom(__DIR__ . '/../config/secure-bridge.php', 'secure-bridge');
+
+        $this->app->singleton('secure-bridge', function ($app) {
+            return new SecureBridge($app, $app['config']->get('secure-bridge', array()));
+        });
+
+        $this->app->alias('secure-bridge', SecureBridge::class);
+    }
+
+    public function boot()
+    {
+        // Publishable config.
+        $this->publishes(array(
+            __DIR__ . '/../config/secure-bridge.php' => $this->configPath(),
+        ), 'secure-bridge-config');
+
+        // Blade directive view.
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'secure-bridge');
+        $this->publishes(array(
+            __DIR__ . '/../resources/views' => $this->resourcePath('views/vendor/secure-bridge'),
+        ), 'secure-bridge-views');
+
+        // Pre-built JavaScript client (UMD) for same-origin Blade apps.
+        $this->publishes(array(
+            __DIR__ . '/../client/dist' => $this->publicPath('vendor/secure-bridge'),
+        ), 'secure-bridge-assets');
+
+        // "secure-bridge" middleware alias.
+        $router = $this->app['router'];
+        if (method_exists($router, 'aliasMiddleware')) {
+            $router->aliasMiddleware('secure-bridge', SecureBridgeMiddleware::class);
+        } else {
+            // Laravel < 5.4
+            $router->middleware('secure-bridge', SecureBridgeMiddleware::class);
+        }
+
+        if ($this->app->runningInConsole()) {
+            $this->commands(array(KeygenCommand::class, DoctorCommand::class));
+        }
+
+        $this->registerBladeDirective();
+    }
+
+    protected function registerBladeDirective()
+    {
+        // @secureBridge — injects the client script + per-session/static config.
+        Blade::directive('secureBridge', function () {
+            return "<?php echo view('secure-bridge::client', ['sbConfig' => app('secure-bridge')->clientConfig()])->render(); ?>";
+        });
+    }
+
+    protected function configPath()
+    {
+        return function_exists('config_path')
+            ? config_path('secure-bridge.php')
+            : $this->app->basePath('config/secure-bridge.php');
+    }
+
+    protected function resourcePath($path)
+    {
+        return function_exists('resource_path')
+            ? resource_path($path)
+            : $this->app->basePath('resources/' . $path);
+    }
+
+    protected function publicPath($path)
+    {
+        return function_exists('public_path')
+            ? public_path($path)
+            : $this->app->basePath('public/' . $path);
+    }
+}
