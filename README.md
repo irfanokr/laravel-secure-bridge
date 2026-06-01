@@ -23,9 +23,21 @@ The important part: **you don't rewrite anything.** You switch it on in one plac
 
 ---
 
-## Setup — this is all you need
+## Setup
 
-This is for a normal Laravel website (pages built with Blade that use `fetch` or jQuery).
+**First, what kind of front-end do you have?** Pick the one that matches your project — the steps are different.
+
+- **A — Laravel Blade pages.** Your screens are `.blade.php` files rendered by Laravel (the classic Laravel website). → **[Setup A](#setup-a)** below.
+- **B — A separate front-end app.** React, Angular, Vue, Svelte, or plain JavaScript that calls your Laravel API. → **[Setup B](#setup-b)** below.
+
+Not sure? If you write `.blade.php` files, you're **A**. If your front-end is a separate project (its own `npm` build) that talks to Laravel over an API, you're **B**.
+
+---
+
+<a id="setup-a"></a>
+### Setup A — Laravel Blade pages
+
+For a classic Laravel website whose pages are Blade files using `fetch` or jQuery.
 
 **1. Install it.** Run these three commands once:
 
@@ -71,37 +83,69 @@ To confirm it's working, run **`php artisan secure-bridge:doctor`**.
 
 ---
 
-## Advanced (only if you need it)
+<a id="setup-b"></a>
+### Setup B — A separate front-end app (React / Angular / Vue / plain JS)
 
-Everything here is **optional** — the setup above already works. Open the part you need.
+Here your JavaScript is a separate project, so there is no `@secureBridge` tag. Instead you add a tiny npm package, and the server hands the browser a key **after the user logs in** (so no secret sits in your downloadable code).
 
-<details>
-<summary><b>My front-end is a separate React / Angular / Vue app</b></summary>
+**On the Laravel server:**
 
-When your front-end is a separate app, you don't want the secret key sitting inside your downloadable JavaScript (anyone could read it there). So instead, the server hands the browser a private key **after the user logs in**, and the browser keeps it in memory only.
+**1. Install it** (run once):
 
-On the server, in `.env`:
+```bash
+composer require irfanokr/laravel-secure-bridge
+php artisan secure-bridge:keygen      # creates your secret key
+```
+
+**2. Turn on the "give the browser a key after login" mode** in `.env`:
 
 ```env
 SECURE_BRIDGE_KEY_SOURCE=token
 SECURE_BRIDGE_HANDSHAKE=true
 ```
 
-In the browser, right after your normal login succeeds:
+**3. Protect your API routes** in `routes/api.php` — but leave your **login** route out (it has no key yet):
+
+```php
+Route::middleware('secure-bridge')->group(function () {
+    // your protected API routes
+});
+```
+
+(The exact little config block — which guard protects the handshake, and listing the login route to skip — is here: **[docs/SECURING-THE-KEY.md → Server setup](docs/SECURING-THE-KEY.md#server-setup)**.)
+
+**In your front-end app:**
+
+**4. Install the client:**
+
+```bash
+npm install secure-bridge-client
+```
+
+**5. Right after your login succeeds, get the key and switch signing on:**
 
 ```js
-import SecureBridge from 'secure-bridge-client';   // npm install secure-bridge-client
+import SecureBridge from 'secure-bridge-client';
 
 // ask the server for this session's key (kept in memory only):
 await SecureBridge.handshake('/secure-bridge/handshake', {
   headers: { Authorization: 'Bearer ' + token },
 });
 
-SecureBridge.installFetch();   // from now on, every request is signed automatically
+SecureBridge.installFetch();   // from now on every request is signed — nothing else to change
 ```
 
-You still don't rewrite your requests — `installFetch()` (or the Angular interceptor) signs them for you. The full step-by-step, the small server config block, and the Angular/React/Vue snippets are here: **[docs/INTEGRATION.md](docs/INTEGRATION.md)** and **[docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)**.
-</details>
+**Done.** You do **not** rewrite your other requests — that one `installFetch()` covers them all. Then:
+
+- Using **axios** (common in Vue/React)? Use `SecureBridge.installAxios(axios)` instead of `installFetch()`.
+- Using **Angular**? Don't use `installFetch` — register the ready-made interceptor once (copy it from **[docs/INTEGRATION.md → Angular](docs/INTEGRATION.md#angular)**); all your `HttpClient` calls are then signed.
+- **React / Vue / Svelte / Node:** same idea, one line at startup — see **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
+
+---
+
+## Advanced (only if you need it)
+
+Everything here is **optional** — Setup A or B above already works. Open the part you need.
 
 <details>
 <summary><b>Also scramble (encrypt) the data, not just sign it</b></summary>
