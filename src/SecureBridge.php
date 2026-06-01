@@ -11,6 +11,7 @@ use Irfanokr\SecureBridge\Drivers\Signature\HmacSignatureDriver;
 use Irfanokr\SecureBridge\Exceptions\DecryptionException;
 use Irfanokr\SecureBridge\Exceptions\SecureBridgeException;
 use Irfanokr\SecureBridge\Support\KeyChain;
+use Irfanokr\SecureBridge\Support\TokenKeyStore;
 
 /**
  * Central service: owns the config, resolves the signature/encryption drivers,
@@ -39,6 +40,9 @@ class SecureBridge
 
     /** @var KeyChain|null */
     private $staticKeyChain;
+
+    /** @var TokenKeyStore|null */
+    private $tokenKeyStore;
 
     public function __construct(Container $app, array $config)
     {
@@ -119,11 +123,44 @@ class SecureBridge
      */
     public function keyChainForRequest($request = null)
     {
-        if ($this->sessionKeyEnabled() && $request !== null && $this->requestHasSession($request)) {
+        $source = $this->keySource();
+
+        if ($source === 'token') {
+            if ($request !== null) {
+                $subject = $this->tokenSubject($request);
+                if ($subject !== null) {
+                    $master = $this->tokenKeyStore()->lookup($subject);
+                    if ($master) {
+                        return KeyChain::fromConfig($master);
+                    }
+                }
+            }
+
+            // No issued key yet: return an empty chain. The middleware turns
+            // this into a "handshake_required" response so the client knows to
+            // call the handshake endpoint.
+            return new KeyChain(array());
+        }
+
+        if ($source === 'session' && $request !== null && $this->requestHasSession($request)) {
             return KeyChain::fromConfig($this->sessionMaster($request));
         }
 
         return $this->staticKeyChain();
+    }
+
+    /**
+     * Effective key source: explicit 'key_source', or 'session' when the
+     * legacy session_key.enabled flag is set, otherwise 'static'.
+     */
+    public function keySource()
+    {
+        $source = $this->config('key_source');
+        if ($source) {
+            return $source;
+        }
+
+        return $this->config('session_key.enabled', false) ? 'session' : 'static';
     }
 
     public function staticKeyChain()
@@ -167,6 +204,84 @@ class SecureBridge
         }
 
         return $value;
+    }
+
+    // -- Token handshake (decoupled SPA per-session keys) ------------------
+
+    /**
+     * The cache-store-backed key store for the 'token' source.
+     */
+    public function tokenKeyStore()
+    {
+        if ($this->tokenKeyStore === null) {
+            $cache = $this->app->make('cache');
+            $store = $this->config('handshake.store');
+            $repo = $store ? $cache->store($store) : $cache->store();
+            $this->tokenKeyStore = new TokenKeyStore($repo, $this->config('handshake.ttl', 3600));
+        }
+
+        return $this->tokenKeyStore;
+    }
+
+    /**
+     * Identify the caller for per-token key binding. Prefers the bearer token
+     * (stateless SPA auth); falls back to the authenticated user id.
+     *
+     * @return string|null
+     */
+    public function tokenSubject($request)
+    {
+        $token = $request->bearerToken();
+        if ($token) {
+            return 'tok:' . hash('sha256', $token);
+        }
+
+        try {
+            $user = $request->user();
+            if ($user !== null) {
+                return 'usr:' . $user->getAuthIdentifier();
+            }
+        } catch (\Exception $e) {
+            // no auth resolved
+        }
+
+        return null;
+    }
+
+    public function issueTokenKey($subject)
+    {
+        return $this->tokenKeyStore()->issue($subject);
+    }
+
+    /**
+     * Build the handshake response: a freshly-issued per-session key plus the
+     * wire settings the client needs. Returns null if the caller is not
+     * authenticated (no resolvable subject).
+     *
+     * @return array|null
+     */
+    public function handshakePayload($request)
+    {
+        $subject = $this->tokenSubject($request);
+        if ($subject === null) {
+            return null;
+        }
+
+        $master = $this->issueTokenKey($subject);
+        $raw = KeyChain::decode($master);
+
+        return array(
+            'key'             => $raw === null ? null : base64_encode($raw),
+            'expiresIn'       => (int) $this->config('handshake.ttl', 3600),
+            'sign'            => (bool) $this->config('sign_requests', true),
+            'encryptRequest'  => (bool) $this->config('encrypt_request', false),
+            'encryptResponse' => (bool) $this->config('encrypt_response', false),
+            'responseMode'    => $this->config('response_mode', 'field'),
+            'responseKey'     => $this->config('response_key', 'data'),
+            'window'          => (int) $this->config('timestamp_window', 300),
+            'headers'         => $this->config('headers'),
+            'query'           => $this->config('query'),
+        );
     }
 
     // -- High level operations --------------------------------------------

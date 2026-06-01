@@ -484,11 +484,41 @@
         };
     }
 
+    /**
+     * Fetch a per-session key from the server handshake endpoint and configure
+     * the client with it (held in memory only). Call this AFTER login, passing
+     * your auth token, and BEFORE installFetch().
+     *
+     *   await SecureBridge.handshake('/secure-bridge/handshake', {
+     *     headers: { Authorization: 'Bearer ' + token }
+     *   });
+     */
+    function handshake(url, init) {
+        init = init || {};
+        // Use the ORIGINAL fetch — the handshake itself is not signed (no key yet).
+        var g = (typeof globalThis !== 'undefined') ? globalThis
+            : (typeof window !== 'undefined' ? window : self);
+        var f = g.__secureBridgeFetch || (typeof fetch !== 'undefined' ? fetch : null);
+        if (!f) {
+            return Promise.reject(new Error('SecureBridge: fetch is not available for handshake.'));
+        }
+        var opts = assign({ method: 'POST', credentials: 'same-origin' }, init);
+        return f(url, opts).then(function (r) {
+            if (!r.ok) {
+                throw new Error('SecureBridge: handshake failed with HTTP ' + r.status);
+            }
+            return r.json();
+        }).then(function (cfg) {
+            return configure(cfg);
+        });
+    }
+
     // ---- public API ------------------------------------------------------
 
     var api = {
         Client: SecureBridgeClient,
         configure: configure,
+        handshake: handshake,
         instance: instance,
         // proxy the common operations to the singleton for convenience
         prepare: function (m, u, b) { return instance().prepare(m, u, b); },
@@ -506,7 +536,7 @@
             buildCanonical: buildCanonical, splitUrl: splitUrl, dropEmptyPairs: dropEmptyPairs,
             bytesToB64: bytesToB64, b64ToBytes: b64ToBytes
         },
-        version: '1.0.0'
+        version: '1.1.0'
     };
 
     return api;

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Irfanokr\SecureBridge\Console\DoctorCommand;
 use Irfanokr\SecureBridge\Console\KeygenCommand;
+use Irfanokr\SecureBridge\Http\HandshakeController;
 use Irfanokr\SecureBridge\Http\Middleware\SecureBridgeMiddleware;
 
 class SecureBridgeServiceProvider extends ServiceProvider
@@ -52,7 +53,21 @@ class SecureBridgeServiceProvider extends ServiceProvider
             $this->commands(array(KeygenCommand::class, DoctorCommand::class));
         }
 
+        $this->registerHandshakeRoute($router);
         $this->registerBladeDirective();
+    }
+
+    protected function registerHandshakeRoute($router)
+    {
+        $config = $this->app['config'];
+        if (! $config->get('secure-bridge.handshake.enabled')) {
+            return;
+        }
+
+        $route = $config->get('secure-bridge.handshake.route', 'secure-bridge/handshake');
+        $middleware = $config->get('secure-bridge.handshake.middleware', array('auth'));
+
+        $router->post($route, HandshakeController::class)->middleware($middleware);
     }
 
     protected function registerBladeDirective()

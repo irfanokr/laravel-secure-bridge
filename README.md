@@ -44,10 +44,14 @@ This is the section every comparable package leaves out, and it is the most impo
 
 ### Making signing genuinely meaningful
 
-Two supported ways to stop relying on a static bundle key:
+> 📕 **Full guide: [docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)** — how to use this safely in a decoupled JS framework, with all four key sources and the honest limits.
 
-1. **Blade per-session keys (recommended for same-origin apps).** When `session_key.enabled` is on, the `@secureBridge` directive mints a **random per-session key server-side** and injects it into the page exactly like the CSRF token. It never lives in a static bundle and rotates per session — so the signature actually proves "this came from an authenticated session in a real browser."
-2. **An asymmetric signature driver (Ed25519/ECDSA).** Plug in a driver where the server holds the public key and the client a per-session private key — no shared secret to leak. The driver interface is built for this (see [Custom drivers](#custom-drivers)).
+Don't ship a static key in a public SPA bundle. Choose a `key_source` instead:
+
+1. **`token` — per-session keys for decoupled SPAs (recommended).** Set `key_source=token` + `handshake.enabled=true`. After login the SPA calls `SecureBridge.handshake('/secure-bridge/handshake', { headers: { Authorization: 'Bearer '+token } })`; the server mints a random key bound to that token and returns it once; the client keeps it **in memory only**. No key in the bundle, a different key per session, useless to anyone reading your JS.
+2. **`session` — Blade per-session keys (recommended for same-origin apps).** `@secureBridge` mints a random per-session key server-side and injects it like the CSRF token — never in a static bundle.
+3. **Asymmetric signature driver (Ed25519/ECDSA).** Server holds the public key, client a per-session private key — no shared secret at all (see [Custom drivers](#custom-drivers)).
+4. **BFF** — for the highest bar, keep the key server-side entirely and give the browser only an HttpOnly cookie (see the guide).
 
 ---
 

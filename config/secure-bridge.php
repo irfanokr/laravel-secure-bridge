@@ -136,14 +136,65 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Blade per-session key  (the strong story)
+    | Where the key comes from  (READ docs/SECURING-THE-KEY.md)
     |--------------------------------------------------------------------------
     |
-    | When enabled and a session is available, the signing/encryption key is a
-    | random per-session secret minted server-side and injected into the page
-    | by the @secureBridge Blade directive — exactly like the CSRF token. The
-    | key never lives in a static JS bundle, which makes signing genuinely
-    | meaningful for same-origin Blade + AJAX apps.
+    | A public SPA cannot hide a secret, so HOW the client gets its key is the
+    | whole security story. Pick a source:
+    |
+    |   'static'   The configured master key. Simplest, but in a decoupled SPA
+    |              it ships in the JS bundle and is therefore NOT secret. Fine
+    |              for local dev, internal tools, or anti-tampering only.
+    |
+    |   'session'  Per-session key from the Laravel session (same-origin Blade
+    |              apps via @secureBridge). The key never sits in a static
+    |              bundle. See "session_key" below.
+    |
+    |   'token'    Per-session key issued AFTER login to authenticated SPAs via
+    |              the handshake endpoint, bound to the bearer token, held only
+    |              in browser memory. This is the recommended source for
+    |              decoupled React/Angular/Vue apps — no key in the bundle, a
+    |              different key per session, useless to anyone reading your JS.
+    |              See "handshake" below.
+    |
+    */
+    'key_source' => env('SECURE_BRIDGE_KEY_SOURCE', 'static'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Token handshake  (per-session keys for decoupled SPAs)
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the package registers POST {route} BEHIND your own auth
+    | middleware. After a user logs in, the SPA calls it once; the server mints
+    | a random key, stores it keyed to the bearer token (in the cache, with a
+    | TTL), and returns it. The SPA keeps it in memory and signs with it.
+    |
+    | Set key_source = 'token' to make the middleware verify against these
+    | per-token keys. Remember to exclude your LOGIN route (and this handshake
+    | route — done automatically) from signing via "except", since the client
+    | has no key until after it authenticates + handshakes.
+    |
+    */
+    'handshake' => [
+        'enabled'    => (bool) env('SECURE_BRIDGE_HANDSHAKE', false),
+        'route'      => env('SECURE_BRIDGE_HANDSHAKE_ROUTE', 'secure-bridge/handshake'),
+        // Your auth middleware — change to 'auth:sanctum', 'auth:api', etc.
+        'middleware' => array('auth'),
+        'ttl'        => (int) env('SECURE_BRIDGE_HANDSHAKE_TTL', 3600),
+        'store'      => env('SECURE_BRIDGE_HANDSHAKE_STORE', null), // cache store; null = default
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Blade per-session key  (the strong story for server-rendered apps)
+    |--------------------------------------------------------------------------
+    |
+    | Used when key_source = 'session'. The signing/encryption key is a random
+    | per-session secret minted server-side and injected into the page by the
+    | @secureBridge Blade directive — exactly like the CSRF token. The key
+    | never lives in a static JS bundle. (For backward compatibility, setting
+    | enabled = true also implies key_source = 'session'.)
     |
     */
     'session_key' => [

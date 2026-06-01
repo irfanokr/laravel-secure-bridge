@@ -44,6 +44,14 @@ class SecureBridgeMiddleware
 
         $keyChain = $this->bridge->keyChainForRequest($request);
 
+        if ($keyChain->isEmpty() && $this->needsKey()) {
+            if ($this->bridge->keySource() === 'token') {
+                return $this->fail(412, 'Secure handshake required before signed requests.', 'handshake_required');
+            }
+
+            return $this->fail(500, 'SecureBridge key is not configured on the server.', 'no_key');
+        }
+
         if ($this->bridge->config('sign_requests', true)) {
             $error = $this->verifyInbound($request, $keyChain);
             if ($error !== null) {
@@ -73,6 +81,12 @@ class SecureBridgeMiddleware
     {
         // CORS preflight never carries a signature.
         if ($request->isMethod('OPTIONS')) {
+            return true;
+        }
+
+        // The handshake endpoint itself is authenticated by the app, not signed.
+        $handshakeRoute = $this->bridge->config('handshake.route');
+        if ($handshakeRoute && $request->is(ltrim($handshakeRoute, '/'))) {
             return true;
         }
 
@@ -122,6 +136,13 @@ class SecureBridgeMiddleware
         }
 
         return false;
+    }
+
+    protected function needsKey()
+    {
+        return $this->bridge->config('sign_requests', true)
+            || $this->bridge->config('encrypt_request', false)
+            || $this->bridge->config('encrypt_response', false);
     }
 
     // -- Inbound: signature + timestamp + replay ---------------------------

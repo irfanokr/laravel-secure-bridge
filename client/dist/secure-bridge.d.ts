@@ -57,6 +57,11 @@ declare namespace SecureBridge {
 
     /** Configure the singleton client used by the convenience/install functions. */
     function configure(config: SecureBridgeConfig): Client;
+    /**
+     * Fetch a per-session key from the server handshake endpoint (after login)
+     * and configure the client with it. Held in memory only.
+     */
+    function handshake(url: string, init?: RequestInit | { headers?: any; [k: string]: any }): Promise<Client>;
     /** The configured singleton (throws if configure() was not called). */
     function instance(): Client;
 

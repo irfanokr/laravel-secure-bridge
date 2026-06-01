@@ -16,11 +16,11 @@ Three things every integration does:
 
 | You serve the SPA from… | Recommended delivery |
 |---|---|
-| The **same** Laravel app (Blade `index`) | `@secureBridge` Blade directive (auto-config, supports **per-session keys**) — nothing else to do |
-| A separate Blade page | `<meta name="sb-key" content="{{ base64_decode_safe(config('secure-bridge.key')) }}">` then read it in JS |
-| A fully **decoupled** build (Netlify/Vercel/S3) | Build-time env var, e.g. `import.meta.env.VITE_SB_KEY` / `process.env.REACT_APP_SB_KEY` |
+| A fully **decoupled** build (Netlify/Vercel/S3) with login | **`token` handshake** — `await SecureBridge.handshake('/secure-bridge/handshake', { headers: { Authorization: 'Bearer ' + token } })` after login. No key in the bundle. **Recommended.** |
+| The **same** Laravel app (Blade `index`) | `@secureBridge` Blade directive (auto-config, **per-session keys**) — nothing else to do |
+| Decoupled, anti-tampering only (no login) | Build-time env var, e.g. `import.meta.env.VITE_SB_KEY` — `static` source; **the key is not secret**, use only for anti-tampering/bot-deterrence |
 
-Remember the [threat model](../README.md#threat-model-read-this-first): a key in a decoupled bundle is **not secret**. For a meaningful secret, serve the app from Laravel and use per-session keys.
+> ⚠️ A key in a decoupled bundle (`static` source) is **not secret**. For anything beyond anti-tampering, use the **`token` handshake** — full guide: **[docs/SECURING-THE-KEY.md](SECURING-THE-KEY.md)**.
 
 ```js
 // reading a meta tag, if you injected one
