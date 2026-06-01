@@ -3,192 +3,205 @@
 [![Packagist](https://img.shields.io/packagist/v/irfanokr/laravel-secure-bridge.svg)](https://packagist.org/packages/irfanokr/laravel-secure-bridge)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Sign — and optionally encrypt — the requests between your JavaScript front-end and your Laravel API, so they can't be tampered with, replayed, or scraped, and so payloads stay out of logs and proxies. Standard primitives only (HMAC-SHA256, AES-256-GCM). Works on **Laravel 5.5 → 12**, **PHP 7.1+**, and **any** JS front-end.
+A simple way to lock down the requests between your website and your Laravel server — so they can't be faked, changed, copied, or read — **without rewriting your code**.
 
-> ℹ️ This is defense-in-depth **on top of** your normal login and HTTPS — not a replacement. Before production, skim the [Threat model](#threat-model).
+Works on **Laravel 5.5 → 12**, **PHP 7.1+**, and any front-end (Blade, React, Angular, Vue, jQuery…).
 
 ---
 
-## Quick start
+## How it works (in plain words)
 
-### 1. Install (run once)
+Every time your website talks to your server — someone logs in, saves a form, loads a list — it sends a *request*. Normally those requests travel in the open. This package quietly does two things to each one:
+
+1. **It signs every request.** It adds a tamper-proof "fingerprint" so your server can be sure the request really came from your website and that nobody changed it on the way. If anything was touched, the server refuses it. It also stops someone from copying a request and sending it again later.
+
+2. **It can lock the contents (optional).** If you turn on encryption, the data inside the request and the reply is scrambled — so even someone watching the traffic (browser tools, server logs, a company proxy) can't read it.
+
+The important part: **you don't rewrite anything.** You switch it on in one place, and it protects the requests your pages already make.
+
+> **One honest note:** this is an *extra* lock on top of your normal login and HTTPS — not a replacement. Keep using your usual login (Sanctum, Passport, JWT, sessions). The plain truth about what it does and doesn't stop is in ["Is this actually secure?"](#is-this-actually-secure) at the bottom.
+
+---
+
+## Setup — this is all you need
+
+This is for a normal Laravel website (pages built with Blade that use `fetch` or jQuery).
+
+**1. Install it.** Run these three commands once:
 
 ```bash
 composer require irfanokr/laravel-secure-bridge
-php artisan secure-bridge:keygen          # writes SECURE_BRIDGE_KEY to your .env
+php artisan secure-bridge:keygen                       # creates your secret key
+php artisan vendor:publish --tag=secure-bridge-assets  # adds the browser script
 ```
 
-(Laravel 5.5+ auto-discovers the package. On older versions, add `Irfanokr\SecureBridge\SecureBridgeServiceProvider` to `config/app.php`.)
+**2. Turn it on.** Add one line to your `.env` file:
 
-### 2. Protect your routes
-
-```php
-// routes/web.php  (or routes/api.php)
-Route::middleware('secure-bridge')->group(function () {
-    Route::post('/profile', [ProfileController::class, 'update']);
-    // ...the routes you want protected
-});
-```
-
-### 3. Sign from the browser — use the block that matches your app
-
-**A) Your front-end is the same Laravel app** (Blade pages doing `fetch` / `$.ajax`):
-
-```bash
-php artisan vendor:publish --tag=secure-bridge-assets
-```
 ```env
 SECURE_BRIDGE_SESSION_KEY=true
 ```
+
+**3. Add one line to your main layout**, inside the `<head>` (after jQuery, if you use jQuery):
+
 ```blade
-{{-- in your layout <head>, after jQuery if you use it --}}
 @secureBridge
 ```
-**Done.** Your existing `fetch` / `$.ajax` calls are now signed — you write no JavaScript.
 
-**B) Your front-end is a separate React / Angular / Vue app with a login:**
+**4. Choose what to protect** in `routes/web.php`:
 
-```bash
-npm install secure-bridge-client
+```php
+Route::middleware('secure-bridge')->group(function () {
+    // put the routes you want protected inside here
+});
 ```
-```js
-import SecureBridge from 'secure-bridge-client';
 
-// run this right after your normal login returns its token:
+**Done.** Every `fetch` and jQuery request your pages already make is now signed automatically. You did not change any JavaScript.
+
+To confirm it's working, run **`php artisan secure-bridge:doctor`**.
+
+---
+
+## Advanced (only if you need it)
+
+Everything here is **optional** — the setup above already works. Open the part you need.
+
+<details>
+<summary><b>My front-end is a separate React / Angular / Vue app</b></summary>
+
+When your front-end is a separate app, you don't want the secret key sitting inside your downloadable JavaScript (anyone could read it there). So instead, the server hands the browser a private key **after the user logs in**, and the browser keeps it in memory only.
+
+On the server, in `.env`:
+
+```env
+SECURE_BRIDGE_KEY_SOURCE=token
+SECURE_BRIDGE_HANDSHAKE=true
+```
+
+In the browser, right after your normal login succeeds:
+
+```js
+import SecureBridge from 'secure-bridge-client';   // npm install secure-bridge-client
+
+// ask the server for this session's key (kept in memory only):
 await SecureBridge.handshake('/secure-bridge/handshake', {
   headers: { Authorization: 'Bearer ' + token },
 });
-SecureBridge.installFetch();   // from now on every request is signed automatically
+
+SecureBridge.installFetch();   // from now on, every request is signed automatically
 ```
-Then on the server set `SECURE_BRIDGE_KEY_SOURCE=token`, turn the handshake on, and exclude your login route — the ready-to-paste server block is in **[SECURING-THE-KEY.md → Server setup](docs/SECURING-THE-KEY.md#server-setup)**.
 
-> **That's the whole setup.** By default requests are **signed + replay-protected**. Want to also **encrypt** the body or response? Set `encrypt_request` / `encrypt_response` (see [Configuration](#configuration)).
+You still don't rewrite your requests — `installFetch()` (or the Angular interceptor) signs them for you. The full step-by-step, the small server config block, and the Angular/React/Vue snippets are here: **[docs/INTEGRATION.md](docs/INTEGRATION.md)** and **[docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)**.
+</details>
 
-### If a request gets rejected
+<details>
+<summary><b>Also scramble (encrypt) the data, not just sign it</b></summary>
 
-| Status & code | What it means | What to do |
-|---|---|---|
-| `412 handshake_required` | (Option B) the browser has no key yet, or it expired | call `SecureBridge.handshake(...)`, then retry |
-| `400 missing_signature` | the route is protected but the request wasn't signed | make sure `@secureBridge` / `installFetch()` actually ran |
-| `400 invalid_signature` | the signature didn't match | for axios/jQuery **GET**s, put query params in the URL string, not a `params` object |
-| `400 stale_timestamp` | the device clock is off by more than 5 min | sync the clock, or raise `SECURE_BRIDGE_WINDOW` |
-| `409 replay` | the same signed request was sent twice | each request is single-use — don't resend it |
+By default requests are signed but not scrambled. To also encrypt the contents, add to `.env`:
 
-Run **`php artisan secure-bridge:doctor`** to check your config, or set `SECURE_BRIDGE_DEBUG=true` to log exactly why a signature failed.
+```env
+SECURE_BRIDGE_ENCRYPT_REQUEST=true     # scramble what the browser sends
+SECURE_BRIDGE_ENCRYPT_RESPONSE=true    # scramble what the server sends back
+```
 
-Need a specific framework (Angular interceptor, axios, Vue, Svelte, Node, file uploads, downloads)? → **[docs/INTEGRATION.md](docs/INTEGRATION.md)** and **[docs/EXAMPLES.md](docs/EXAMPLES.md)**.
+The package unscrambles it automatically on each side. Your controllers still read normal data with `$request->input(...)`, and your JavaScript still gets normal data back.
+</details>
 
----
+<details>
+<summary><b>Protect only some routes, or pick features per route</b></summary>
 
-## Threat model
-
-The honest version, because it decides whether this package is even worth adding.
-
-**A public SPA cannot hold a secret.** Any key shipped inside downloadable JavaScript can be read by anyone who opens the bundle. So be precise about what this layer buys you.
-
-**What it protects against (on top of HTTPS):**
-
-| ✅ Protects | How |
-|---|---|
-| Request **tampering** in transit / by intermediaries | HMAC over a canonical request; any change invalidates it |
-| **Replay** of a captured request | Timestamp window + single-use nonce |
-| Casual **bots / scrapers** that don't run or read your JS | They can't produce a valid signature |
-| **Payload exposure** in server logs, APM tools, browser extensions, TLS-terminating proxies | AES-256-GCM end-to-end between browser and PHP |
-
-**What it does NOT *fully* stop — and how the package shrinks each gap:**
-
-| ❌ Limitation | Why it exists | ✅ How the package reduces it |
-|---|---|---|
-| A **static key** in a bundle isn't secret | It's right there in the JS — anyone can read and reuse it | Don't ship a static key: use `key_source=token` (key never enters the bundle, different per session) or `session` (Blade). With `signature_driver=ecdsa` the signing key is **non-extractable** — it can't be copied out *at all*. |
-| Anything **TLS already covers** | This is defense-in-depth, not a replacement for HTTPS | Keep HTTPS on (`require_https=true`); this layer *adds to* TLS. |
-| **XSS on your own site** | Injected script runs with your page's privileges while the page is open | Signing can't cure XSS, but: (a) the bundled **CSP + Trusted Types** helper *prevents* most XSS; (b) `ecdsa` non-extractable keys stop the key being *stolen* for offline reuse; (c) short key TTL + a **BFF** shrink the window. Playbook → [docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md). |
-
-**Bottom line:** it's a hardening / anti-tampering / anti-automation / log-hygiene layer — never your authentication or authorization. Keep real auth (Sanctum, Passport, JWT, sessions) underneath it.
-
-**Pick a key source** (full guide: [docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)):
-
-- **`session`** — Blade per-session keys (Option A above). Never in a static bundle. Best for same-origin apps.
-- **`token`** — per-session key fetched after login, kept in memory only (Option B above). Best for decoupled SPAs. Add `signature_driver=ecdsa` for a non-extractable key.
-- **`static`** — key in the bundle. Only for internal tools / anti-tampering, never anything sensitive.
-- **BFF** — keep the key server-side entirely; the browser holds only an HttpOnly cookie. Highest bar.
-
----
-
-## Configuration
-
-`config/secure-bridge.php` (publish it with `php artisan vendor:publish --tag=secure-bridge-config`; every value is env-overridable):
-
-| Key | Env | Default | Purpose |
-|---|---|---|---|
-| `key` | `SECURE_BRIDGE_KEY` | — | Master secret (`base64:…`). Sign/enc sub-keys are HKDF-derived from it. |
-| `previous_keys` | `SECURE_BRIDGE_PREVIOUS_KEYS` | `[]` | Old keys accepted during rotation. |
-| `sign_requests` | `SECURE_BRIDGE_SIGN` | `true` | Verify HMAC + timestamp + nonce. |
-| `encrypt_request` | `SECURE_BRIDGE_ENCRYPT_REQUEST` | `false` | Decrypt the request body. |
-| `encrypt_response` | `SECURE_BRIDGE_ENCRYPT_RESPONSE` | `false` | Encrypt the response. |
-| `signature_driver` | `SECURE_BRIDGE_SIGNATURE_DRIVER` | `hmac` | `hmac` or `ecdsa` (non-extractable browser keypair; needs `key_source=token`). |
-| `key_source` | `SECURE_BRIDGE_KEY_SOURCE` | `static` | `static` / `session` (Blade) / `token` (SPA handshake). |
-| `handshake.*` | `SECURE_BRIDGE_HANDSHAKE` | off | Per-session key endpoint for SPAs (route, auth middleware, TTL). |
-| `csp.*` | `SECURE_BRIDGE_CSP` | off | Strict CSP + Trusted Types via the `secure-bridge.csp` middleware (XSS prevention). |
-| `encryption_driver` | `SECURE_BRIDGE_ENCRYPTION_DRIVER` | `aes-gcm` | Swappable encryption driver. |
-| `timestamp_window` | `SECURE_BRIDGE_WINDOW` | `300` | Allowed clock skew (seconds). Never `0`. |
-| `replay_protection` | `SECURE_BRIDGE_REPLAY` | `true` | Enforce single-use nonces. |
-| `nonce_store` | `SECURE_BRIDGE_NONCE_STORE` | `null` | Cache store for nonces (use Redis in prod / multi-server). |
-| `response_mode` | `SECURE_BRIDGE_RESPONSE_MODE` | `field` | `field` (encrypt one key) or `full`. |
-| `response_key` | `SECURE_BRIDGE_RESPONSE_KEY` | `data` | Field to encrypt in `field` mode. |
-| `only` / `except` | — | see file | URI patterns to include/exclude (mirrors Laravel's CSRF `$except`). |
-| `sign_multipart` | `SECURE_BRIDGE_SIGN_MULTIPART` | `true` | Sign `multipart/form-data` uploads body-less (so they can't bypass the layer). Body is never encrypted. |
-| `require_https` | `SECURE_BRIDGE_REQUIRE_HTTPS` | `false` | Reject non-HTTPS requests (localhost exempt). |
-| `session_key.enabled` | `SECURE_BRIDGE_SESSION_KEY` | `false` | Per-session keys for Blade apps (implies `key_source=session`). |
-| `debug` | `SECURE_BRIDGE_DEBUG` | `false` | Log *why* a signature failed (dev only). |
-| `events` | `SECURE_BRIDGE_EVENTS` | `true` | Dispatch a `RequestBlocked` event on every rejection (logging/alerting). |
-
-### Pick features per route
-
-Apply only what a route needs — anything not named is off:
+Apply the middleware only where you want it, and choose which features run on each route (anything you don't name is off):
 
 ```php
 Route::middleware('secure-bridge:sign')->post('/api/login', ...);              // sign only
-Route::middleware('secure-bridge:sign,encrypt-response')->get('/api/me', ...); // sign + encrypt response
-Route::middleware('secure-bridge:encrypt,https')->post('/api/secret', ...);    // encrypt both + require HTTPS
+Route::middleware('secure-bridge:sign,encrypt-response')->get('/api/me', ...); // sign + scramble the reply
+Route::middleware('secure-bridge:encrypt,https')->post('/api/secret', ...);    // scramble both ways + force HTTPS
 Route::middleware('secure-bridge:all')->post('/api/transfer', ...);            // everything
 ```
 
-Tokens: `sign`, `encrypt-request`, `encrypt-response`, `encrypt`, `all`, `https`, `no-https`. No token = use the config defaults. To register it globally instead, add `\Irfanokr\SecureBridge\Http\Middleware\SecureBridgeMiddleware::class` to the `api` middleware group and scope it with `only`/`except`.
+Words you can use: `sign`, `encrypt-request`, `encrypt-response`, `encrypt`, `all`, `https`, `no-https`. With no word it uses your normal settings.
+</details>
 
----
+<details>
+<summary><b>Stronger security (non-stealable keys, anti-XSS, server-only key)</b></summary>
 
-## Wire format (v1)
+For higher-value apps the package supports:
 
-```
-keys      signKey = HKDF-SHA256(master, info="secure-bridge:sign:v1", 32 bytes)
-          encKey  = HKDF-SHA256(master, info="secure-bridge:enc:v1",  32 bytes)
+- **Non-extractable keys** (`SECURE_BRIDGE_SIGNATURE_DRIVER=ecdsa`, with the token setup above) — the browser's signing key can't be copied out, even by malicious scripts.
+- **A built-in CSP + Trusted Types helper** to *prevent* cross-site-scripting in the first place.
+- **A "BFF" pattern** where the key never leaves the server at all.
 
-canonical METHOD \n PATH \n QUERY \n TIMESTAMP \n NONCE \n sha256hex(rawBody)
-signature header  X-Sig: v1=<hmac_sha256_hex(signKey, canonical)>
-          plus    X-Timestamp: <unix-seconds>,  X-Nonce: <random hex>
-          (or query params __sb_sig / __sb_ts / __sb_nonce for downloads)
+These are explained simply, with when-to-use-each, in **[docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)**.
+</details>
 
-envelope  v1.<base64(iv[12])>.<base64(ciphertext || gcmTag[16])>
-          AES-256-GCM, AAD = "secure-bridge:v1"
-          request body becomes  {"__cipher":"<envelope>"}
-```
-
-`php artisan secure-bridge:doctor` prints a deterministic conformance test vector (canonical string + expected `X-Sig`), so a client developer can confirm their implementation matches the server byte-for-byte.
-
----
-
-## Key rotation
+<details>
+<summary><b>Change the key later (rotation)</b></summary>
 
 ```env
-SECURE_BRIDGE_KEY=base64:NEWKEY...
-SECURE_BRIDGE_PREVIOUS_KEYS=base64:OLDKEY...
+SECURE_BRIDGE_KEY=base64:NEW_KEY...
+SECURE_BRIDGE_PREVIOUS_KEYS=base64:OLD_KEY...
 ```
 
-New traffic uses the current key; previous keys are still **accepted** for verification/decryption, so clients update without downtime.
+New requests use the new key; the old key still works for a while, so your users don't get logged out or broken during the switch.
+</details>
 
-## Custom drivers
+<details>
+<summary><b>All settings (full configuration reference)</b></summary>
 
-Bind your own and select it by name:
+Publish the config file with `php artisan vendor:publish --tag=secure-bridge-config`. Every value can also be set in `.env`.
+
+| Setting | `.env` variable | Default | What it does |
+|---|---|---|---|
+| `key` | `SECURE_BRIDGE_KEY` | — | Your secret key (created by `secure-bridge:keygen`). |
+| `previous_keys` | `SECURE_BRIDGE_PREVIOUS_KEYS` | `[]` | Old keys still accepted during a key change. |
+| `sign_requests` | `SECURE_BRIDGE_SIGN` | `true` | Turn signing on/off. |
+| `encrypt_request` | `SECURE_BRIDGE_ENCRYPT_REQUEST` | `false` | Scramble what the browser sends. |
+| `encrypt_response` | `SECURE_BRIDGE_ENCRYPT_RESPONSE` | `false` | Scramble what the server replies. |
+| `signature_driver` | `SECURE_BRIDGE_SIGNATURE_DRIVER` | `hmac` | `hmac` (normal) or `ecdsa` (non-stealable key). |
+| `key_source` | `SECURE_BRIDGE_KEY_SOURCE` | `static` | Where the key comes from: `static` / `session` (Blade) / `token` (separate app). |
+| `handshake.*` | `SECURE_BRIDGE_HANDSHAKE` | off | The "give the browser a key after login" endpoint for separate apps. |
+| `csp.*` | `SECURE_BRIDGE_CSP` | off | The built-in anti-XSS (CSP + Trusted Types) helper. |
+| `timestamp_window` | `SECURE_BRIDGE_WINDOW` | `300` | How many seconds of clock difference to allow. |
+| `replay_protection` | `SECURE_BRIDGE_REPLAY` | `true` | Block the same request from being sent twice. |
+| `nonce_store` | `SECURE_BRIDGE_NONCE_STORE` | `null` | Where to remember used requests (use Redis in production). |
+| `response_mode` | `SECURE_BRIDGE_RESPONSE_MODE` | `field` | Scramble one field (`field`) or the whole reply (`full`). |
+| `response_key` | `SECURE_BRIDGE_RESPONSE_KEY` | `data` | Which field to scramble in `field` mode. |
+| `only` / `except` | — | see file | Which URLs to include / skip. |
+| `sign_multipart` | `SECURE_BRIDGE_SIGN_MULTIPART` | `true` | Sign file uploads too (so they can't sneak past). |
+| `require_https` | `SECURE_BRIDGE_REQUIRE_HTTPS` | `false` | Reject non-HTTPS requests (localhost is allowed). |
+| `session_key.enabled` | `SECURE_BRIDGE_SESSION_KEY` | `false` | The simple Blade setup (a fresh key per visitor). |
+| `debug` | `SECURE_BRIDGE_DEBUG` | `false` | While developing, log *why* a request was refused. |
+| `events` | `SECURE_BRIDGE_EVENTS` | `true` | Fire an event whenever a request is blocked (for logging/alerts). |
+</details>
+
+<details>
+<summary><b>If a request gets refused — what the codes mean</b></summary>
+
+| Code you see | What it means | What to do |
+|---|---|---|
+| `412 handshake_required` | (separate-app setup) the browser hasn't got its key yet, or it expired | call `SecureBridge.handshake(...)` again, then retry |
+| `400 missing_signature` | the route is protected but the request wasn't signed | make sure `@secureBridge` (or `installFetch()`) actually ran |
+| `400 invalid_signature` | the fingerprint didn't match | for jQuery/axios **GET**s, put the query values in the URL, not a separate `data`/`params` object |
+| `400 stale_timestamp` | the device clock is more than 5 minutes off | fix the clock, or raise `SECURE_BRIDGE_WINDOW` |
+| `409 replay` | the same request was sent twice | each request can only be used once — don't resend it |
+
+Tip: set `SECURE_BRIDGE_DEBUG=true` while developing and the log tells you exactly what went wrong.
+</details>
+
+<details>
+<summary><b>Technical details (for the curious): what's on the wire, custom drivers</b></summary>
+
+The fingerprint is an HMAC-SHA256 over a canonical string, and encryption is AES-256-GCM (standard, audited building blocks — nothing hand-rolled):
+
+```
+canonical = METHOD \n PATH \n QUERY \n TIMESTAMP \n NONCE \n sha256hex(body)
+header    X-Sig: v1=<hmac_sha256_hex(signKey, canonical)>
+          X-Timestamp, X-Nonce   (or __sb_sig / __sb_ts / __sb_nonce for download links)
+envelope  v1.<base64(iv)>.<base64(ciphertext+tag)>   (AES-256-GCM, AAD "secure-bridge:v1")
+```
+
+`php artisan secure-bridge:doctor` prints a sample fingerprint so a client developer can confirm both sides agree.
+
+You can swap in your own signing or encryption method by binding a driver:
 
 ```php
 $this->app->bind('secure-bridge.signature.ed25519', Ed25519SignatureDriver::class);
@@ -198,21 +211,37 @@ SECURE_BRIDGE_SIGNATURE_DRIVER=ed25519
 ```
 
 Implement `Irfanokr\SecureBridge\Contracts\SignatureDriver` or `EncryptionDriver`.
+</details>
 
-## Notes & limitations (by design)
+---
 
-- **Response encryption scope.** `field` mode (default) encrypts only the configured key (`data`); use `response_mode=full` to encrypt the whole JSON body. Streamed / binary / file responses are never encrypted.
-- **Reading the decrypted body.** Controllers read decrypted fields via `$request->input()` / `all()` / `validated()`. `$request->getContent()` still returns the raw (encrypted) body.
-- **Header integrity.** The signature covers method, path, query, timestamp, nonce and a body digest — not arbitrary headers. Supply a custom signature driver if you need a specific header bound in.
-- **Transport.** Always run behind HTTPS (`require_https=true`); this is defense-in-depth on top of TLS, never a replacement.
+<a id="threat-model"></a>
+## Is this actually secure?
+
+The honest answer, in plain words.
+
+**What it genuinely protects:**
+
+- Nobody can **change** a request without the server noticing.
+- A captured request can't be **re-sent** later.
+- Simple **bots and scrapers** that don't run your site's code can't make valid requests.
+- With encryption on, the data is **hidden** from logs, browser extensions, and company proxies.
+
+**What it does *not* do (and how the package helps anyway):**
+
+- **A key inside public JavaScript is not a real secret.** Anyone can read your downloadable code. → So for separate apps, use the "give the browser a key after login" setup (the key never sits in your code) or, for Blade sites, the per-session key from the simple setup above. With the `ecdsa` option the key can't even be copied out.
+- **It is not a replacement for HTTPS or for your login.** It's an extra layer on top. Keep both.
+- **It can't protect a page that's already running an attacker's script (XSS).** Nothing signing-based can. The package ships an anti-XSS helper (CSP + Trusted Types) to *prevent* that, and non-stealable keys to limit the damage if it happens.
+
+The full, careful version (with the strongest setups) is in **[docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md)**.
 
 ---
 
 ## Requirements
 
-- PHP **7.1+** with `ext-openssl` (AES-256-GCM) and `ext-json`.
+- PHP **7.1+** with the `openssl` and `json` extensions.
 - Laravel **5.5 → 12**.
-- Browser with the Web Crypto API in a **secure context** (HTTPS or `localhost`).
+- A browser on **HTTPS** (or `localhost`).
 
 ## License
 

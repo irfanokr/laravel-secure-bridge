@@ -3,6 +3,17 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.4.3] - 2026-06-01
+
+### Documentation
+- **README rewritten in plain, everyday language.** Added a "How it works (in plain
+  words)" explanation, a single **minimal setup** that does everything (install →
+  one `.env` line → one Blade line → wrap routes), and moved every optional feature
+  into a collapsible **Advanced** section (separate front-end apps, encryption,
+  per-route features, stronger security, key rotation, full config table, error
+  codes, technical/wire-format details). The honest "Is this actually secure?"
+  threat model is now in plain language at the bottom. No code or behaviour change.
+
 ## [1.4.2] - 2026-06-01
 
 ### Changed (integration is now zero-touch)
