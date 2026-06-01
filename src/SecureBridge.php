@@ -164,11 +164,18 @@ class SecureBridge
     public function keySource()
     {
         $source = $this->config('key_source');
-        if ($source) {
-            return $source;
+
+        // The legacy session_key.enabled flag means "use per-session keys" (the
+        // 'session' source). It must win over an unset OR default 'static'
+        // source — otherwise the @secureBridge directive hands the page a
+        // per-session key while the middleware verifies against the static one,
+        // and every signed request fails. It never overrides an explicit
+        // 'token' (decoupled SPA) setup.
+        if ($this->config('session_key.enabled', false) && $source !== 'token') {
+            return 'session';
         }
 
-        return $this->config('session_key.enabled', false) ? 'session' : 'static';
+        return $source ?: 'static';
     }
 
     public function staticKeyChain()

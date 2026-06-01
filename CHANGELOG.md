@@ -3,6 +3,30 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.4.4] - 2026-06-01
+
+### Fixed
+- **Per-session keys (Blade `@secureBridge`) now actually verify.** When
+  `session_key.enabled=true` but `key_source` was left at its default (`static`),
+  the `@secureBridge` directive handed the page a per-session key while the
+  middleware verified against the *static* key — so every signed request failed.
+  `keySource()` now treats the `session_key.enabled` flag as the `session` source
+  even when `key_source` is unset or `static` (it still never overrides an explicit
+  `token` setup). This is the exact "Setup A" path in the README.
+
+### Tests
+- Added `SessionKeyTest` covering the Blade per-session round-trip (the key the
+  server hands the page is the same one the middleware verifies, it differs from
+  the static key, and it is stable per session / unique across sessions). Both
+  scenarios are now explicitly tested — Blade (`SessionKey`) and separate-app
+  (`Handshake` / `EcdsaHandshake`). 32 tests pass on PHP 8.3.
+
+### Documentation
+- Rewrote Setup B (separate front-end) with a plain-language explanation of the
+  handshake and a complete, copy-paste, "where the code goes" example for each
+  front-end (plain JavaScript/HTML, React, Angular, Vue) in collapsible boxes —
+  no need to leave the README.
+
 ## [1.4.3] - 2026-06-01
 
 ### Documentation

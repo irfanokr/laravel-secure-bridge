@@ -86,60 +86,143 @@ To confirm it's working, run **`php artisan secure-bridge:doctor`**.
 <a id="setup-b"></a>
 ### Setup B — A separate front-end app (React / Angular / Vue / plain JS)
 
-Here your JavaScript is a separate project, so there is no `@secureBridge` tag. Instead you add a tiny npm package, and the server hands the browser a key **after the user logs in** (so no secret sits in your downloadable code).
+Here your screens are **not** Blade — Laravel is just the API, and your front-end (React, Angular, Vue, or plain JavaScript) is a separate project.
 
-**On the Laravel server:**
+**How it works, in plain words:** you don't want your secret key sitting inside downloadable JavaScript, because anyone could read it there. So instead, **right after a user logs in, your app asks the server once for a key.** That one request is called the *handshake*. The server gives that logged-in session its own key, your app keeps it in memory, and from then on every request is signed with it. You add this in **one place** — you never touch your other request code.
 
-**1. Install it** (run once):
+#### Step 1 — the server (same for every front-end)
 
 ```bash
 composer require irfanokr/laravel-secure-bridge
 php artisan secure-bridge:keygen      # creates your secret key
 ```
 
-**2. Turn on the "give the browser a key after login" mode** in `.env`:
+In `.env`, turn on "give the browser a key after login":
 
 ```env
 SECURE_BRIDGE_KEY_SOURCE=token
 SECURE_BRIDGE_HANDSHAKE=true
 ```
 
-**3. Protect your API routes** in `routes/api.php` — but leave your **login** route out (it has no key yet):
+Protect your API routes in `routes/api.php`, but leave your **login** route out of the group (it has no key yet):
 
 ```php
 Route::middleware('secure-bridge')->group(function () {
-    // your protected API routes
+    // your protected API routes go here
 });
 ```
 
-(The exact little config block — which guard protects the handshake, and listing the login route to skip — is here: **[docs/SECURING-THE-KEY.md → Server setup](docs/SECURING-THE-KEY.md#server-setup)**.)
+(The small handshake config — which login guard protects it, which routes to skip — is in [docs/SECURING-THE-KEY.md → Server setup](docs/SECURING-THE-KEY.md#server-setup).)
 
-**In your front-end app:**
+#### Step 2 — your front-end: open the box for the app you use
 
-**4. Install the client:**
+Each box is a **complete** example that shows exactly where the code goes. You only ever do three things: install once, call the handshake once after login, and add one "switch it on" line. Your existing requests are never rewritten.
 
-```bash
-npm install secure-bridge-client
+<details>
+<summary><b>Plain JavaScript / HTML (no build tools, no npm)</b></summary>
+
+```html
+<!-- 1. Load the client — one script tag in your page. -->
+<script src="https://unpkg.com/secure-bridge-client"></script>
+
+<script>
+  // 2. Your normal login, then the handshake, then switch signing on.
+  async function login() {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'me@example.com', password: 'secret' }),
+    });
+    const data = await res.json();
+
+    // Ask the server once for this session's key:
+    await SecureBridge.handshake('/secure-bridge/handshake', {
+      headers: { Authorization: 'Bearer ' + data.token },
+    });
+
+    // Switch signing on. After this, write normal fetch() anywhere — it's signed.
+    SecureBridge.installFetch();
+  }
+
+  // Anywhere later in your code — unchanged, now automatically signed:
+  // fetch('/api/orders', { method: 'POST', body: JSON.stringify({ item: 42 }) });
+</script>
 ```
+</details>
 
-**5. Right after your login succeeds, get the key and switch signing on:**
+<details>
+<summary><b>React</b></summary>
 
-```js
+```jsx
+// 1. Install once:  npm install secure-bridge-client
 import SecureBridge from 'secure-bridge-client';
 
-// ask the server for this session's key (kept in memory only):
+// 2. In the function that runs after a successful login:
+async function onLoginSuccess(token) {
+  await SecureBridge.handshake('/secure-bridge/handshake', {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  SecureBridge.installFetch();          // or: SecureBridge.installAxios(axios)
+}
+
+// 3. Done. Every fetch()/axios call in your app is now signed.
+//    You do NOT change your existing requests.
+```
+</details>
+
+<details>
+<summary><b>Angular</b></summary>
+
+Angular has a built-in way to touch every request — an "interceptor". You write this one file and never edit your `this.http.get/post(...)` calls.
+
+```ts
+// 1. Install once:  npm install secure-bridge-client
+
+// 2. Create this file:  src/app/secure-bridge.interceptor.ts
+import { HttpInterceptorFn } from '@angular/common/http';
+import { from, switchMap } from 'rxjs';
+import SecureBridge from 'secure-bridge-client';
+
+export const secureBridgeInterceptor: HttpInterceptorFn = (req, next) =>
+  from(SecureBridge.prepare(req.method, req.urlWithParams, req.body)).pipe(
+    switchMap(p => next(req.clone({ setHeaders: p.headers, body: p.body ?? req.body })))
+  );
+
+// 3. Register it once, in main.ts:
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+bootstrapApplication(AppComponent, {
+  providers: [provideHttpClient(withInterceptors([secureBridgeInterceptor]))],
+});
+
+// 4. After your login returns a token, do the handshake once:
 await SecureBridge.handshake('/secure-bridge/handshake', {
   headers: { Authorization: 'Bearer ' + token },
 });
-
-SecureBridge.installFetch();   // from now on every request is signed — nothing else to change
+// From now on every this.http.get/post(...) is signed. Nothing else changes.
 ```
 
-**Done.** You do **not** rewrite your other requests — that one `installFetch()` covers them all. Then:
+(On an older Angular that uses `NgModule`? The class-based interceptor version is in [docs/INTEGRATION.md → Angular](docs/INTEGRATION.md#angular).)
+</details>
 
-- Using **axios** (common in Vue/React)? Use `SecureBridge.installAxios(axios)` instead of `installFetch()`.
-- Using **Angular**? Don't use `installFetch` — register the ready-made interceptor once (copy it from **[docs/INTEGRATION.md → Angular](docs/INTEGRATION.md#angular)**); all your `HttpClient` calls are then signed.
-- **React / Vue / Svelte / Node:** same idea, one line at startup — see **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
+<details>
+<summary><b>Vue</b></summary>
+
+```js
+// 1. Install once:  npm install secure-bridge-client
+import SecureBridge from 'secure-bridge-client';
+import axios from 'axios';   // if you use axios
+
+// 2. After a successful login:
+async function onLoginSuccess(token) {
+  await SecureBridge.handshake('/secure-bridge/handshake', {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  SecureBridge.installAxios(axios);     // or SecureBridge.installFetch() if you use fetch
+}
+
+// 3. Done. Every request your app makes is now signed — you change nothing else.
+```
+</details>
 
 ---
 
