@@ -7,6 +7,7 @@ use Illuminate\Support\Arr;
 use Irfanokr\SecureBridge\Contracts\EncryptionDriver;
 use Irfanokr\SecureBridge\Contracts\SignatureDriver;
 use Irfanokr\SecureBridge\Drivers\Encryption\AesGcmEncryptionDriver;
+use Irfanokr\SecureBridge\Drivers\Signature\EcdsaSignatureDriver;
 use Irfanokr\SecureBridge\Drivers\Signature\HmacSignatureDriver;
 use Irfanokr\SecureBridge\Exceptions\DecryptionException;
 use Irfanokr\SecureBridge\Exceptions\SecureBridgeException;
@@ -72,13 +73,15 @@ class SecureBridge
             return $this->signatureDriver;
         }
 
-        $name = $this->config('signature_driver', 'hmac');
+        $name = $this->signatureDriverName();
         $binding = 'secure-bridge.signature.' . $name;
 
         if ($this->app->bound($binding)) {
             $this->signatureDriver = $this->app->make($binding);
         } elseif ($name === 'hmac') {
             $this->signatureDriver = new HmacSignatureDriver();
+        } elseif ($name === 'ecdsa') {
+            $this->signatureDriver = new EcdsaSignatureDriver();
         } else {
             throw new SecureBridgeException(
                 'SecureBridge: unknown signature driver [' . $name . ']. '
@@ -87,6 +90,11 @@ class SecureBridge
         }
 
         return $this->signatureDriver;
+    }
+
+    public function signatureDriverName()
+    {
+        return $this->config('signature_driver', 'hmac');
     }
 
     public function encryptionDriver()
@@ -267,11 +275,12 @@ class SecureBridge
             return null;
         }
 
-        $master = $this->issueTokenKey($subject);
-        $raw = KeyChain::decode($master);
+        $ecdsa = $this->signatureDriverName() === 'ecdsa';
+        $encrypting = (bool) $this->config('encrypt_request', false) || (bool) $this->config('encrypt_response', false);
 
-        return array(
-            'key'             => $raw === null ? null : base64_encode($raw),
+        $payload = array(
+            'signatureDriver' => $this->signatureDriverName(),
+            'key'             => null,
             'expiresIn'       => (int) $this->config('handshake.ttl', 3600),
             'sign'            => (bool) $this->config('sign_requests', true),
             'encryptRequest'  => (bool) $this->config('encrypt_request', false),
@@ -282,6 +291,27 @@ class SecureBridge
             'headers'         => $this->config('headers'),
             'query'           => $this->config('query'),
         );
+
+        if ($ecdsa) {
+            // The browser registers its non-extractable public key; it signs
+            // with the private key, so no signing key is returned.
+            $publicKey = $request->input('publicKey');
+            if (! is_string($publicKey) || $publicKey === '') {
+                return array('error' => 'missing_public_key');
+            }
+            $this->tokenKeyStore()->putPublicKey($subject, $publicKey);
+
+            // A symmetric key is only needed if payload encryption is on.
+            if ($encrypting) {
+                $raw = KeyChain::decode($this->issueTokenKey($subject));
+                $payload['key'] = $raw === null ? null : base64_encode($raw);
+            }
+        } else {
+            $raw = KeyChain::decode($this->issueTokenKey($subject));
+            $payload['key'] = $raw === null ? null : base64_encode($raw);
+        }
+
+        return $payload;
     }
 
     // -- High level operations --------------------------------------------
@@ -304,6 +334,71 @@ class SecureBridge
         }
 
         return false;
+    }
+
+    /**
+     * Verify a request signature, choosing the right key material for the
+     * driver: the per-subject public key for ECDSA, or the symmetric key chain
+     * for HMAC.
+     */
+    public function verifyRequest($canonical, $signatureValue, $request, KeyChain $keyChain)
+    {
+        $signature = $this->stripVersionTag($signatureValue);
+        if ($signature === null) {
+            return false;
+        }
+
+        if ($this->signatureDriverName() === 'ecdsa') {
+            $subject = $request !== null ? $this->tokenSubject($request) : null;
+            if ($subject === null) {
+                return false;
+            }
+            $spki = $this->tokenKeyStore()->getPublicKey($subject);
+            if (! $spki) {
+                return false;
+            }
+
+            return $this->signatureDriver()->verify($canonical, $signature, $spki);
+        }
+
+        $driver = $this->signatureDriver();
+        foreach ($keyChain->signKeys() as $key) {
+            if ($driver->verify($canonical, $signature, $key)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the request has the key material it needs. Returns null when
+     * ready, or array(status, message, code) describing what is missing.
+     */
+    public function readinessError($request, KeyChain $keyChain)
+    {
+        $source = $this->keySource();
+        $signing = (bool) $this->config('sign_requests', true);
+        $encrypting = (bool) $this->config('encrypt_request', false) || (bool) $this->config('encrypt_response', false);
+        $ecdsa = $this->signatureDriverName() === 'ecdsa';
+
+        if ($signing && $ecdsa) {
+            $subject = $request !== null ? $this->tokenSubject($request) : null;
+            if ($subject === null || ! $this->tokenKeyStore()->getPublicKey($subject)) {
+                return array(412, 'Secure handshake required before signed requests.', 'handshake_required');
+            }
+        }
+
+        $needsSymmetric = $encrypting || ($signing && ! $ecdsa);
+        if ($needsSymmetric && $keyChain->isEmpty()) {
+            if ($source === 'token') {
+                return array(412, 'Secure handshake required.', 'handshake_required');
+            }
+
+            return array(500, 'SecureBridge key is not configured on the server.', 'no_key');
+        }
+
+        return null;
     }
 
     /**
@@ -394,5 +489,15 @@ class SecureBridge
             'headers'         => $this->config('headers'),
             'query'           => $this->config('query'),
         );
+    }
+
+    /**
+     * The per-request CSP nonce set by CspMiddleware, or '' if not active.
+     */
+    public function cspNonce()
+    {
+        $binding = \Irfanokr\SecureBridge\Http\Middleware\CspMiddleware::NONCE_BINDING;
+
+        return $this->app->bound($binding) ? (string) $this->app->make($binding) : '';
     }
 }

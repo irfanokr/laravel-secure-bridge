@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use Irfanokr\SecureBridge\Console\DoctorCommand;
 use Irfanokr\SecureBridge\Console\KeygenCommand;
 use Irfanokr\SecureBridge\Http\HandshakeController;
+use Irfanokr\SecureBridge\Http\Middleware\CspMiddleware;
 use Irfanokr\SecureBridge\Http\Middleware\SecureBridgeMiddleware;
 
 class SecureBridgeServiceProvider extends ServiceProvider
@@ -44,9 +45,11 @@ class SecureBridgeServiceProvider extends ServiceProvider
         $router = $this->app['router'];
         if (method_exists($router, 'aliasMiddleware')) {
             $router->aliasMiddleware('secure-bridge', SecureBridgeMiddleware::class);
+            $router->aliasMiddleware('secure-bridge.csp', CspMiddleware::class);
         } else {
             // Laravel < 5.4
             $router->middleware('secure-bridge', SecureBridgeMiddleware::class);
+            $router->middleware('secure-bridge.csp', CspMiddleware::class);
         }
 
         if ($this->app->runningInConsole()) {
@@ -75,6 +78,11 @@ class SecureBridgeServiceProvider extends ServiceProvider
         // @secureBridge — injects the client script + per-session/static config.
         Blade::directive('secureBridge', function () {
             return "<?php echo view('secure-bridge::client', ['sbConfig' => app('secure-bridge')->clientConfig()])->render(); ?>";
+        });
+
+        // @cspNonce — the per-request CSP nonce, for <script nonce="@cspNonce">.
+        Blade::directive('cspNonce', function () {
+            return "<?php echo e(app('secure-bridge')->cspNonce()); ?>";
         });
     }
 

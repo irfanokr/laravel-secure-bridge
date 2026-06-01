@@ -49,11 +49,34 @@ class TokenKeyStore
     public function revoke($subject)
     {
         $this->cache->forget($this->cacheKey($subject));
+        $this->cache->forget($this->publicKeyCacheKey($subject));
+    }
+
+    /**
+     * Store the client's ECDSA public key (base64 SPKI) for the subject — used
+     * by the asymmetric signature driver to verify that subject's requests.
+     */
+    public function putPublicKey($subject, $spkiBase64)
+    {
+        $this->cache->put($this->publicKeyCacheKey($subject), (string) $spkiBase64, $this->expiry());
+    }
+
+    /**
+     * @return string|null base64 SPKI public key, or null if none/expired.
+     */
+    public function getPublicKey($subject)
+    {
+        return $this->cache->get($this->publicKeyCacheKey($subject));
     }
 
     private function cacheKey($subject)
     {
         return 'secure_bridge:token_key:' . hash('sha256', (string) $subject);
+    }
+
+    private function publicKeyCacheKey($subject)
+    {
+        return 'secure_bridge:pubkey:' . hash('sha256', (string) $subject);
     }
 
     private function expiry()

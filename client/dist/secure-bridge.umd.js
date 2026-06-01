@@ -214,6 +214,7 @@
         c = c || {};
         return {
             key: c.key,
+            signatureDriver: c.signatureDriver || 'hmac',
             sign: c.sign !== false,
             encryptRequest: !!c.encryptRequest,
             encryptResponse: !!c.encryptResponse,
@@ -232,6 +233,8 @@
     function SecureBridgeClient(config) {
         this.config = normalizeConfig(config);
         this._keys = null;
+        this._signMode = this.config.signatureDriver === 'ecdsa' ? 'ecdsa' : 'hmac';
+        this._privateKey = null; // non-extractable ECDSA CryptoKey, set by handshake()
     }
 
     SecureBridgeClient.prototype._derive = function () {
@@ -257,15 +260,21 @@
         var cfg = this.config;
         method = (method || 'GET').toUpperCase();
 
-        return this._derive().then(function (keys) {
+        var isEcdsa = self._signMode === 'ecdsa' && self._privateKey;
+        var hasBody = body !== undefined && body !== null && WRITE_METHODS.indexOf(method) !== -1;
+        var needEnc = hasBody && cfg.encryptRequest;
+        var needSym = needEnc || (cfg.sign && !isEcdsa);
+
+        var keysPromise = needSym ? self._derive() : Promise.resolve(null);
+
+        return keysPromise.then(function (keys) {
             var headers = {};
-            var hasBody = body !== undefined && body !== null && WRITE_METHODS.indexOf(method) !== -1;
             var bodyPromise;
 
             if (hasBody) {
                 var plaintext = (typeof body === 'string') ? body : JSON.stringify(body);
                 headers['Content-Type'] = 'application/json';
-                if (cfg.encryptRequest) {
+                if (needEnc) {
                     bodyPromise = aesGcmEncrypt(keys.enc, plaintext).then(function (env) {
                         return JSON.stringify({ __cipher: env });
                     });
@@ -286,8 +295,12 @@
                 var query = dropEmptyPairs(parts.query, []);
                 return sha256Hex(bodyString).then(function (bodyHash) {
                     var canonical = buildCanonical(method, parts.path, query, ts, nonce, bodyHash);
-                    return hmacHex(keys.sign, canonical).then(function (mac) {
-                        headers[cfg.headers.signature] = 'v1=' + mac;
+                    var sigPromise = isEcdsa
+                        ? getCrypto().subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, self._privateKey, utf8(canonical))
+                            .then(function (buf) { return 'v1=' + bytesToB64(new Uint8Array(buf)); })
+                        : hmacHex(keys.sign, canonical).then(function (mac) { return 'v1=' + mac; });
+                    return sigPromise.then(function (sigVal) {
+                        headers[cfg.headers.signature] = sigVal;
                         headers[cfg.headers.timestamp] = ts;
                         headers[cfg.headers.nonce] = nonce;
                         return { url: url, method: method, headers: headers, body: hasBody ? bodyString : undefined };
@@ -301,9 +314,12 @@
      * Append signature query parameters to a GET URL (downloads / window.open).
      */
     SecureBridgeClient.prototype.signUrl = function (url) {
+        var self = this;
         var cfg = this.config;
         if (!cfg.sign) { return Promise.resolve(url); }
-        return this._derive().then(function (keys) {
+        var isEcdsa = self._signMode === 'ecdsa' && self._privateKey;
+        var keysPromise = isEcdsa ? Promise.resolve(null) : self._derive();
+        return keysPromise.then(function (keys) {
             var ts = Math.floor(Date.now() / 1000).toString();
             var nonce = makeNonce();
             var parts = splitUrl(url);
@@ -311,10 +327,14 @@
             var query = dropEmptyPairs(parts.query, stripKeys);
             return sha256Hex('').then(function (bodyHash) {
                 var canonical = buildCanonical('GET', parts.path, query, ts, nonce, bodyHash);
-                return hmacHex(keys.sign, canonical).then(function (mac) {
+                var macPromise = isEcdsa
+                    ? getCrypto().subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, self._privateKey, utf8(canonical))
+                        .then(function (buf) { return bytesToB64(new Uint8Array(buf)); })
+                    : hmacHex(keys.sign, canonical);
+                return macPromise.then(function (mac) {
                     var sep = url.indexOf('?') === -1 ? '?' : '&';
                     return url + sep
-                        + cfg.query.signature + '=v1=' + mac
+                        + cfg.query.signature + '=' + encodeURIComponent('v1=' + mac)
                         + '&' + cfg.query.timestamp + '=' + ts
                         + '&' + cfg.query.nonce + '=' + nonce;
                 });
@@ -502,15 +522,41 @@
         if (!f) {
             return Promise.reject(new Error('SecureBridge: fetch is not available for handshake.'));
         }
-        var opts = assign({ method: 'POST', credentials: 'same-origin' }, init);
-        return f(url, opts).then(function (r) {
-            if (!r.ok) {
-                throw new Error('SecureBridge: handshake failed with HTTP ' + r.status);
-            }
-            return r.json();
-        }).then(function (cfg) {
-            return configure(cfg);
-        });
+
+        var subtle = getCrypto().subtle;
+        var keyPair;
+
+        // Generate a NON-EXTRACTABLE ECDSA key pair and register only the
+        // public key. If the server is in HMAC mode it simply ignores the
+        // public key and returns a symmetric key instead.
+        return subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])
+            .then(function (kp) {
+                keyPair = kp;
+                return subtle.exportKey('spki', kp.publicKey);
+            })
+            .then(function (spki) {
+                var headers = assign({ 'Content-Type': 'application/json' }, headersToObject(init.headers));
+                var opts = assign({ credentials: 'same-origin' }, init, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({ publicKey: bytesToB64(new Uint8Array(spki)) })
+                });
+                return f(url, opts);
+            })
+            .then(function (r) {
+                if (!r.ok) {
+                    throw new Error('SecureBridge: handshake failed with HTTP ' + r.status);
+                }
+                return r.json();
+            })
+            .then(function (cfg) {
+                var client = configure(cfg);
+                if (cfg.signatureDriver === 'ecdsa') {
+                    client._signMode = 'ecdsa';
+                    client._privateKey = keyPair.privateKey;
+                }
+                return client;
+            });
     }
 
     // ---- public API ------------------------------------------------------
@@ -536,7 +582,7 @@
             buildCanonical: buildCanonical, splitUrl: splitUrl, dropEmptyPairs: dropEmptyPairs,
             bytesToB64: bytesToB64, b64ToBytes: b64ToBytes
         },
-        version: '1.1.0'
+        version: '1.2.0'
     };
 
     return api;

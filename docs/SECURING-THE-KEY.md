@@ -134,7 +134,14 @@ So the strategy is two layers: **prevent the injection**, and **limit the blast 
 - **Dependency hygiene + Subresource Integrity** — most modern XSS arrives through a compromised package, not your own code.
 
 ### Layer 2 — Limit the damage if XSS still happens
-- **Non-extractable keys (`extractable: false`).** Generate the signing key *in the browser* as a non-extractable `CryptoKey` (ECDSA P-256) and register only the **public** key with the server. Injected script can then *use* the key while the page is open but **cannot exfiltrate** it for offline / long-term / replayed abuse — the IETF browser-apps BCP recommendation for DPoP. ([InfoQ](https://www.infoq.com/articles/dpop-key-storage-unsolved-problem/)) *(SecureBridge: available via an `asymmetric` driver — see below.)*
+- **Non-extractable keys — built in.** Set `signature_driver=ecdsa` with `key_source=token`. The browser generates a non-extractable ECDSA P-256 `CryptoKey`, registers only the **public** key at handshake, and signs with a private key it can never export. Injected script can *use* the key while the page is open but **cannot exfiltrate** it for offline / long-term / replayed abuse — the IETF browser-apps BCP recommendation for DPoP. ([InfoQ](https://www.infoq.com/articles/dpop-key-storage-unsolved-problem/))
+  ```env
+  SECURE_BRIDGE_KEY_SOURCE=token
+  SECURE_BRIDGE_HANDSHAKE=true
+  SECURE_BRIDGE_SIGNATURE_DRIVER=ecdsa
+  ```
+  The client is identical — `await SecureBridge.handshake(url, { headers: { Authorization: 'Bearer '+token } })` auto-generates the keypair and sends the public key. Nothing else changes.
+- **Strict CSP + Trusted Types — built in.** Enable `csp.enabled`, apply the `secure-bridge.csp` middleware to your web routes, and put `@cspNonce` on your `<script>` tags. This is *prevention* (Layer 1) shipped with the package; start with `csp.report_only=true` to find violations first.
 - **Keep the auth token in an HttpOnly cookie / use a BFF.** XSS can't read an HttpOnly cookie's value (it can still ride it for live requests, but can't steal it). A BFF means no usable secret sits in the browser at all. ([OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html))
 - **Short key TTL + rebind** so a captured key dies fast.
 - **Server-side anomaly detection / rate limiting**, since a compromised page's requests still look perfectly valid.

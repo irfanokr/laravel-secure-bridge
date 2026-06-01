@@ -50,8 +50,10 @@ Don't ship a static key in a public SPA bundle. Choose a `key_source` instead:
 
 1. **`token` — per-session keys for decoupled SPAs (recommended).** Set `key_source=token` + `handshake.enabled=true`. After login the SPA calls `SecureBridge.handshake('/secure-bridge/handshake', { headers: { Authorization: 'Bearer '+token } })`; the server mints a random key bound to that token and returns it once; the client keeps it **in memory only**. No key in the bundle, a different key per session, useless to anyone reading your JS.
 2. **`session` — Blade per-session keys (recommended for same-origin apps).** `@secureBridge` mints a random per-session key server-side and injects it like the CSRF token — never in a static bundle.
-3. **Asymmetric signature driver (Ed25519/ECDSA).** Server holds the public key, client a per-session private key — no shared secret at all (see [Custom drivers](#custom-drivers)).
+3. **Asymmetric, non-extractable keys (`signature_driver=ecdsa`, strongest for XSS).** With `key_source=token`, the browser generates a **non-extractable ECDSA P-256 keypair**, registers only the public key at handshake, and signs with a private key it can never export — so injected XSS cannot steal the signing key for offline reuse. No shared secret at all.
 4. **BFF** — for the highest bar, keep the key server-side entirely and give the browser only an HttpOnly cookie (see the guide).
+
+To *prevent* XSS in the first place, enable the bundled **CSP + Trusted Types** helper: set `csp.enabled` and apply the `secure-bridge.csp` middleware to your web routes, then put `@cspNonce` on your `<script>` tags. See [docs/SECURING-THE-KEY.md](docs/SECURING-THE-KEY.md).
 
 ---
 
@@ -141,7 +143,10 @@ That injects the client and a **per-session** key, and auto-wires `window.fetch`
 | `sign_requests` | `SECURE_BRIDGE_SIGN` | `true` | Verify HMAC + timestamp + nonce. |
 | `encrypt_request` | `SECURE_BRIDGE_ENCRYPT_REQUEST` | `false` | Decrypt the request body. |
 | `encrypt_response` | `SECURE_BRIDGE_ENCRYPT_RESPONSE` | `false` | Encrypt the response. |
-| `signature_driver` | `SECURE_BRIDGE_SIGNATURE_DRIVER` | `hmac` | Swappable signature driver. |
+| `signature_driver` | `SECURE_BRIDGE_SIGNATURE_DRIVER` | `hmac` | `hmac` or `ecdsa` (non-extractable browser keypair; needs `key_source=token`). |
+| `key_source` | `SECURE_BRIDGE_KEY_SOURCE` | `static` | `static` / `session` (Blade) / `token` (SPA handshake). See [SECURING-THE-KEY](docs/SECURING-THE-KEY.md). |
+| `handshake.*` | `SECURE_BRIDGE_HANDSHAKE` | off | Per-session key endpoint for SPAs (route, auth middleware, TTL). |
+| `csp.*` | `SECURE_BRIDGE_CSP` | off | Strict CSP + Trusted Types via the `secure-bridge.csp` middleware (XSS prevention). |
 | `encryption_driver` | `SECURE_BRIDGE_ENCRYPTION_DRIVER` | `aes-gcm` | Swappable encryption driver. |
 | `timestamp_window` | `SECURE_BRIDGE_WINDOW` | `300` | Allowed clock skew (seconds). Never `0`. |
 | `replay_protection` | `SECURE_BRIDGE_REPLAY` | `true` | Enforce single-use nonces. |

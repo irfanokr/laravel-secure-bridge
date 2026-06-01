@@ -3,6 +3,27 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.2.0] - 2026-06-01
+
+### Added
+- **Asymmetric signing — `signature_driver=ecdsa` (ECDSA P-256).** The browser
+  generates a NON-EXTRACTABLE keypair, registers only the public key at
+  handshake, and signs with a private key it can never export — so injected XSS
+  cannot exfiltrate the signing key for offline reuse. Verified end-to-end
+  (Web Crypto sign -> PHP openssl_verify, with P1363->DER + SPKI->PEM).
+- **CSP + Trusted Types helper** — `csp` config + `secure-bridge.csp` middleware
+  emit a strict, nonce-based Content-Security-Policy (optionally Trusted Types),
+  with an `@cspNonce` Blade directive. XSS *prevention*, opt-in.
+- `docs/SECURING-THE-KEY.md` expanded with an XSS-handling section (own-console
+  vs injected XSS; prevent vs limit) and concrete enablement.
+- Client `handshake()` now transparently generates the non-extractable keypair
+  in ECDSA mode; `signatureDriver` added to the client config/types.
+
+### Removed
+- The `request-type` / header-based bypass (it let any caller skip the layer by
+  setting a header). Exclude URLs with the `except`/`only` patterns (mirroring
+  Laravel's `VerifyCsrfToken`) or per-route `withoutMiddleware('secure-bridge')`.
+
 ## [1.1.0] - 2026-06-01
 
 ### Added

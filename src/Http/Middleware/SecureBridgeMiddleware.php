@@ -44,12 +44,9 @@ class SecureBridgeMiddleware
 
         $keyChain = $this->bridge->keyChainForRequest($request);
 
-        if ($keyChain->isEmpty() && $this->needsKey()) {
-            if ($this->bridge->keySource() === 'token') {
-                return $this->fail(412, 'Secure handshake required before signed requests.', 'handshake_required');
-            }
-
-            return $this->fail(500, 'SecureBridge key is not configured on the server.', 'no_key');
+        $readiness = $this->bridge->readinessError($request, $keyChain);
+        if ($readiness !== null) {
+            return $this->fail($readiness[0], $readiness[1], $readiness[2]);
         }
 
         if ($this->bridge->config('sign_requests', true)) {
@@ -123,13 +120,6 @@ class SecureBridgeMiddleware
         return false;
     }
 
-    protected function needsKey()
-    {
-        return $this->bridge->config('sign_requests', true)
-            || $this->bridge->config('encrypt_request', false)
-            || $this->bridge->config('encrypt_response', false);
-    }
-
     // -- Inbound: signature + timestamp + replay ---------------------------
 
     protected function verifyInbound($request, $keyChain)
@@ -163,7 +153,7 @@ class SecureBridgeMiddleware
 
         $canonical = Canonicalizer::fromRequest($request, (string) $ts, (string) $nonce, $stripKeys);
 
-        if (! $this->bridge->verifyCanonical($canonical, $sig, $keyChain)) {
+        if (! $this->bridge->verifyRequest($canonical, $sig, $request, $keyChain)) {
             if ($this->bridge->config('debug', false)) {
                 $this->container->make('log')->warning('SecureBridge: signature mismatch', array(
                     'canonical_built' => $canonical,

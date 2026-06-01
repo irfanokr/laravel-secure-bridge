@@ -18,11 +18,18 @@ class HandshakeController
     {
         $payload = $bridge->handshakePayload($request);
 
-        if ($payload === null || $payload['key'] === null) {
+        if ($payload === null) {
             return response()->json(array(
                 'error' => 'Unauthenticated — cannot issue a SecureBridge key.',
                 'code'  => 'unauthenticated',
             ), 401);
+        }
+
+        if (isset($payload['error'])) {
+            return response()->json(array(
+                'error' => 'A public key is required for asymmetric (ECDSA) mode.',
+                'code'  => $payload['error'],
+            ), 400);
         }
 
         return response()->json($payload);

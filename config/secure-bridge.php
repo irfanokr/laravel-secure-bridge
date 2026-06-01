@@ -57,7 +57,15 @@ return [
     |
     | Bind your own implementation in a service provider as
     | "secure-bridge.signature.{name}" / "secure-bridge.encryption.{name}" to
-    | add a custom driver (e.g. an Ed25519 asymmetric signer).
+    | add a custom driver.
+    |
+    | signature_driver:
+    |   'hmac'  — HMAC-SHA256 with a shared key (default). Simple; pairs with
+    |             any key_source.
+    |   'ecdsa' — Asymmetric ECDSA P-256. The browser generates a
+    |             NON-EXTRACTABLE key pair and registers only its public key at
+    |             handshake (requires key_source = 'token'). Injected XSS cannot
+    |             exfiltrate the signing key. Strongest option for SPAs.
     |
     */
     'signature_driver'  => env('SECURE_BRIDGE_SIGNATURE_DRIVER', 'hmac'),
@@ -195,6 +203,32 @@ return [
         'enabled'   => (bool) env('SECURE_BRIDGE_SESSION_KEY', false),
         'ttl'       => (int) env('SECURE_BRIDGE_SESSION_KEY_TTL', 7200),
         'session_id' => 'secure_bridge_key', // session key name holding the secret
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Content-Security-Policy + Trusted Types  (XSS *prevention*, opt-in)
+    |--------------------------------------------------------------------------
+    |
+    | Signing/encryption can't protect a page that is already running attacker
+    | code — preventing XSS does. Enable this and apply the 'secure-bridge.csp'
+    | middleware to your web routes to emit a strict, nonce-based CSP (plus
+    | Trusted Types). Put @cspNonce on every <script> tag:
+    |
+    |     <script nonce="@cspNonce"> ... </script>
+    |
+    | The literal "{nonce}" in the policy below is replaced per request. Start
+    | in report_only mode to find violations before enforcing.
+    |
+    */
+    'csp' => [
+        'enabled'       => (bool) env('SECURE_BRIDGE_CSP', false),
+        'report_only'   => (bool) env('SECURE_BRIDGE_CSP_REPORT_ONLY', false),
+        'trusted_types' => (bool) env('SECURE_BRIDGE_CSP_TRUSTED_TYPES', false),
+        'policy'        => "default-src 'self'; "
+                         . "script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; "
+                         . "object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        'report_uri'    => env('SECURE_BRIDGE_CSP_REPORT_URI', null),
     ],
 
     /*

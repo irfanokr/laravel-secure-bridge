@@ -12,8 +12,10 @@ declare namespace SecureBridge {
     }
 
     interface SecureBridgeConfig {
-        /** base64 of the 32-byte master secret (the base64 part of SECURE_BRIDGE_KEY). */
-        key: string;
+        /** base64 of the 32-byte master secret. May be null in ECDSA mode without encryption. */
+        key: string | null;
+        /** 'hmac' (default) or 'ecdsa' (non-extractable keypair via handshake()). */
+        signatureDriver?: 'hmac' | 'ecdsa';
         /** Sign requests with HMAC-SHA256 + timestamp + nonce. Default: true. */
         sign?: boolean;
         /** Encrypt the request body (POST/PUT/PATCH/DELETE). Default: false. */
