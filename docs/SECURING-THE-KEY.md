@@ -118,6 +118,30 @@ If you cannot accept *any* browser-held secret, put a thin server-side **Backend
 
 In this model the signing layer runs **server-to-server** (use `key_source=static` between BFF and API, both servers, key truly secret), and the browser never holds a usable secret at all.
 
+## Handling XSS / injected scripts ("a script run from the console / network")
+
+First, separate two things people lump together:
+
+1. **A user opening *their own* browser console** and calling `fetch()` / the client to craft requests. This is **not an attack on anyone else** — that person is already authenticated as themselves and can do anything their account allows. No signing scheme can (or should) stop someone acting as themselves; browsers even print a self-XSS warning in the console. Don't design against this — it isn't a vulnerability.
+2. **Injected XSS** — attacker-controlled script running inside a **victim's** page (stored/reflected/DOM XSS, or a poisoned npm dependency). This is the real threat, and the honest truth is: **once attacker script runs on your origin it has the same powers your app does** — it can read the in-memory key, ride the auth cookie, and sign requests *while the page is open*.
+
+So the strategy is two layers: **prevent the injection**, and **limit the blast radius** if it still happens.
+
+### Layer 1 — Prevent injection (the only real cure)
+- **Strict Content-Security-Policy** with a nonce/hash-based `script-src` — blocks injected and inline scripts. ([web.dev strict-csp](https://web.dev/articles/strict-csp), [MDN CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP))
+- **Trusted Types** (`Content-Security-Policy: require-trusted-types-for 'script'`) — neutralizes DOM-XSS sinks. ([MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/require-trusted-types-for), [Chrome](https://developer.chrome.com/docs/lighthouse/best-practices/trusted-types-xss)) Chromium-only today, degrades gracefully.
+- **Use your framework's auto-escaping** and never bypass it (`innerHTML`, React `dangerouslySetInnerHTML`, Angular `bypassSecurityTrust*`). ([Angular security](https://angular.dev/best-practices/security))
+- **Dependency hygiene + Subresource Integrity** — most modern XSS arrives through a compromised package, not your own code.
+
+### Layer 2 — Limit the damage if XSS still happens
+- **Non-extractable keys (`extractable: false`).** Generate the signing key *in the browser* as a non-extractable `CryptoKey` (ECDSA P-256) and register only the **public** key with the server. Injected script can then *use* the key while the page is open but **cannot exfiltrate** it for offline / long-term / replayed abuse — the IETF browser-apps BCP recommendation for DPoP. ([InfoQ](https://www.infoq.com/articles/dpop-key-storage-unsolved-problem/)) *(SecureBridge: available via an `asymmetric` driver — see below.)*
+- **Keep the auth token in an HttpOnly cookie / use a BFF.** XSS can't read an HttpOnly cookie's value (it can still ride it for live requests, but can't steal it). A BFF means no usable secret sits in the browser at all. ([OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html))
+- **Short key TTL + rebind** so a captured key dies fast.
+- **Server-side anomaly detection / rate limiting**, since a compromised page's requests still look perfectly valid.
+
+### Bottom line
+Request signing/encryption is **not an XSS defense.** It raises the bar — no static key to lift from the bundle, and (with non-extractable keys) no key to steal for offline reuse — but it **cannot protect a page that is already executing attacker code.** The defense against XSS is *preventing XSS*: strict CSP + Trusted Types + framework escaping + dependency hygiene, with a **BFF** for the highest bar.
+
 ## Decision guide
 
 - **Internal admin tool / dev / "stop casual tampering and bots"** → `static` is fine. Document it.

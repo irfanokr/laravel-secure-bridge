@@ -290,7 +290,7 @@ const p = await SecureBridge.prepare('POST', 'https://api.example.com/api/sync',
 await fetch(p.url, { method: p.method, headers: p.headers, body: p.body });
 ```
 
-(For trusted server-to-server callers you can also skip the layer entirely with the `bypass` token — see the config.)
+(For routes that should never be signed — webhooks, health checks — add the URI pattern to the `except` list in the config, or simply don't apply the `secure-bridge` middleware to them.)
 
 ---
 

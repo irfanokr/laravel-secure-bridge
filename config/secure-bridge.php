@@ -95,12 +95,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Route scoping (only relevant when applied as global middleware)
+    | Excluding URLs  (the standard, idiomatic way)
     |--------------------------------------------------------------------------
     |
-    | If "only" is non-empty, ONLY matching paths are protected. Any path that
-    | matches "except" is always skipped. Patterns use Laravel's Request::is()
-    | wildcard syntax.
+    | There are two ways to leave a route unprotected, both standard Laravel:
+    |
+    |   1. Simply DON'T apply the 'secure-bridge' middleware to it. This is the
+    |      cleanest approach when you assign the middleware per route/group.
+    |
+    |   2. When the middleware runs globally (e.g. on the whole 'api' group),
+    |      list URI patterns in "except" to skip them — mirroring how Laravel's
+    |      own VerifyCsrfToken middleware uses its $except list. If "only" is
+    |      non-empty, ONLY matching paths are protected. Patterns use the
+    |      Request::is() wildcard syntax (e.g. 'api/webhooks/*').
+    |
+    | There is intentionally NO client-type / header-based bypass — that would
+    | let anyone skip the layer by setting a header. URL patterns are the only
+    | bypass.
     |
     */
     'only'   => [],
@@ -108,23 +119,6 @@ return [
         'api/health',
         'telescope*',
         'horizon*',
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Bypass (clients that don't speak the protocol)
-    |--------------------------------------------------------------------------
-    |
-    | Requests carrying the bypass header with the configured value, or whose
-    | "request-type" header is in "request_types", skip the whole layer. Use
-    | this for native mobile apps or trusted server-to-server callers that
-    | authenticate some other way. Leave "value" null to disable the header.
-    |
-    */
-    'bypass' => [
-        'header'        => 'X-Secure-Bridge-Bypass',
-        'value'         => env('SECURE_BRIDGE_BYPASS_TOKEN'),
-        'request_types' => ['android'],
     ],
 
     /*

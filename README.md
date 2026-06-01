@@ -148,8 +148,7 @@ That injects the client and a **per-session** key, and auto-wires `window.fetch`
 | `nonce_store` | `SECURE_BRIDGE_NONCE_STORE` | `null` | Cache store for nonces (use Redis in prod). |
 | `response_mode` | `SECURE_BRIDGE_RESPONSE_MODE` | `field` | `field` (encrypt one key) or `full`. |
 | `response_key` | `SECURE_BRIDGE_RESPONSE_KEY` | `data` | Field to encrypt in `field` mode. |
-| `only` / `except` | — | see file | Path patterns to scope global usage. |
-| `bypass.*` | `SECURE_BRIDGE_BYPASS_TOKEN` | — | Let trusted/native clients skip the layer. |
+| `only` / `except` | — | see file | URI patterns to exclude (mirrors Laravel's CSRF `$except`). The only bypass — no header/client-type bypass exists. |
 | `skip_multipart` | — | `true` | Skip `multipart/form-data` uploads. |
 | `session_key.enabled` | `SECURE_BRIDGE_SESSION_KEY` | `false` | Per-session keys for Blade apps. |
 | `debug` | `SECURE_BRIDGE_DEBUG` | `false` | Log *why* a signature failed (dev only). |

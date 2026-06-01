@@ -90,21 +90,6 @@ class SecureBridgeMiddleware
             return true;
         }
 
-        // Explicit bypass token (trusted non-browser callers).
-        $header = $this->bridge->config('bypass.header');
-        $value = $this->bridge->config('bypass.value');
-        if ($header && $value !== null && $value !== ''
-            && hash_equals((string) $value, (string) $request->header($header, ''))) {
-            return true;
-        }
-
-        // Legacy clients identified by a request-type header (e.g. android).
-        $requestTypes = (array) $this->bridge->config('bypass.request_types', array());
-        $requestType = (string) $request->header('request-type', '');
-        if ($requestType !== '' && in_array($requestType, $requestTypes, true)) {
-            return true;
-        }
-
         // Multipart uploads can't be JSON-enveloped by the client.
         if ($this->bridge->config('skip_multipart', true)) {
             $contentType = (string) $request->header('content-type', '');
