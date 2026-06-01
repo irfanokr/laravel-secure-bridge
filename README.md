@@ -139,6 +139,10 @@ async function startSecureBridge(token) {        // `token` = your app's normal 
 
 That single `SecureBridge.install()` is the whole point. It hooks the browser's request machinery (`fetch` **and** `XMLHttpRequest`). **It does not matter how your app sends requests** — `fetch`, `axios`, `jQuery`, and even **Angular's `HttpClient`** all run on top of those two, so every one of them is signed automatically. **You never touch your request code** — there is nothing to change across your screens, no matter how many requests you have.
 
+> **You change exactly ONE place — never your request files.** You add this package's code only at your app's startup (the two lines above). You do **not** edit, wrap, or replace any `fetch`/`$.ajax`/`$http`/axios call anywhere — not one, whether you have 10 requests or 10,000.
+>
+> This is also why you don't need jQuery's `ajaxPrefilter` / `ajaxStart` / `beforeSend`: those only catch jQuery's own calls. `install()` hooks `fetch` and `XMLHttpRequest` — the layer that jQuery, axios and Angular all use underneath — so it catches **everything** with one call. (See [Exactly which requests get signed?](#which-requests) for the full list.)
+
 > ### ⚠️ Important: page reloads — read this
 > The signing key is kept in **memory only** (a JavaScript variable). The package **never** puts it in `localStorage`, `sessionStorage`, or a cookie, because anything there can be read by any script (XSS) and lingers after the session — that would defeat the security.
 >
@@ -186,6 +190,35 @@ That single `SecureBridge.install()` is the whole point. It hooks the browser's 
 ## Advanced (only if you need it)
 
 Everything here is **optional** — Setup A or B above already works. Open the part you need.
+
+<a id="which-requests"></a>
+<details>
+<summary><b>Exactly which requests get signed? (does it really catch everything?)</b></summary>
+
+`install()` hooks the browser's two request engines — `fetch` and `XMLHttpRequest` — so it catches every request **regardless of the library**, because they all use one of those two underneath. You wire it once at startup; you never touch a single call site.
+
+**Signed automatically (✅):**
+
+| How your code sends the request | What it uses underneath | Signed? |
+|---|---|---|
+| `fetch(...)` | `fetch` | ✅ |
+| `new XMLHttpRequest()` (raw) | `XMLHttpRequest` | ✅ |
+| jQuery `$.ajax` / `$.get` / `$.post` / `$.getJSON` / `$(...).load()` | `XMLHttpRequest` | ✅ |
+| axios (browser) | `XMLHttpRequest` | ✅ |
+| Angular `HttpClient` (`this.http.get/post/...`) | `XMLHttpRequest` (or `fetch` with `withFetch()`) | ✅ |
+| anything built on the above (react-query, SWR, Vue Resource, …) | `fetch` / `XMLHttpRequest` | ✅ |
+
+**Not signed (rare, and none are normal API calls) (❌):**
+
+| Mechanism | Why | What to do if you need it |
+|---|---|---|
+| `navigator.sendBeacon()` | Fire-and-forget telemetry on page unload; not a normal request | Use `SecureBridge.signUrl()` and beacon to a signed URL, if it matters |
+| **JSONP** (`<script>`-tag, e.g. Angular `HttpClient.jsonp`) | It's a script include, not a request with headers/body | JSONP is cross-origin and legacy; avoid for protected endpoints |
+| WebSocket / Server-Sent Events | A different protocol, not HTTP request/response | Authenticate the socket separately |
+| A native `<form>` submit (full page navigation) | The browser navigates; it's not an AJAX call | For a signed download link use `SecureBridge.signUrl()` |
+
+So: every way your app makes **API/data requests** is covered by the one `install()` call. The exceptions are things that aren't AJAX in the first place.
+</details>
 
 <details>
 <summary><b>Also scramble (encrypt) the data, not just sign it</b></summary>
