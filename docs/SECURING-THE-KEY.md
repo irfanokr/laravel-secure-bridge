@@ -10,8 +10,8 @@ This is the most important document in the package. Read it before you ship.
 
 ## Which key source should I use? (quick decision)
 
-- **Laravel Blade pages (same site)** → **`session`**. The `@secureBridge` directive injects a fresh key into each page; nothing to manage. → [README → Setup A](../README.md#setup-a).
-- **A separate React/Angular/Vue app with a login** → **`token`** (recommended). The server hands the browser a per-session key after login (the handshake); no key in your code. → [README → Setup B](../README.md#setup-b).
+- **Laravel Blade pages (same site)** → **`session`**. The `@secureBridge` directive injects a fresh key into each page; nothing to manage. → [README → Section A](../README.md#a--server-rendered-laravel-blade).
+- **A separate React/Angular/Vue app with a login** → **`token`** (recommended). The server hands the browser a per-session key after login (the handshake); no key in your code, and `SecureBridge.start({...})` manages it for you. → [README → Section B](../README.md#b--separate-front-end--laravel-api).
 - **No login — internal tool / just anti-tampering** → **`static`**. A key baked into your code: simple, but visible to anyone, so never for anything sensitive.
 - **Highest security / regulated** → **BFF**. A small server holds the key; the browser never has one.
 
@@ -80,42 +80,20 @@ Apply the `secure-bridge` middleware to your protected API routes as usual. The 
 
 ### Client setup (framework-agnostic)
 
+One call at app startup — it fetches the per-session key on the first request, keeps it in memory only, and renews it as needed:
+
 ```js
 import SecureBridge from 'secure-bridge-client';
 
-// 1) Log in with your normal auth flow → get { token }
-// 2) Handshake (NOT signed; carries the auth token):
-await SecureBridge.handshake('/secure-bridge/handshake', {
-  headers: { Authorization: `Bearer ${token}` },
+SecureBridge.start({
+  handshake: '/secure-bridge/handshake',
+  token: () => localStorage.getItem('auth_token'),   // your normal login token
 });
-// 3) Now every same-origin request is signed with the in-memory per-session key:
-SecureBridge.installFetch();
 ```
 
-That's it — `handshake()` calls `configure()` for you with the server-issued key and wire settings.
+`start()` performs the handshake (which is itself unsigned and carries your auth token), keeps the server-issued key in memory, and signs every same-origin request from then on. A request made before login (no token) is sent unsigned, so public/login routes keep working. The same call covers React, Angular, Vue, Svelte, plain JS and jQuery — see [INTEGRATION.md](INTEGRATION.md#where-the-one-call-goes-per-framework) for *where* to put it in each.
 
-#### Angular
-
-```ts
-// after login resolves with the token:
-await SecureBridge.handshake('/secure-bridge/handshake', {
-  headers: { Authorization: `Bearer ${token}` },
-});
-// then your SecureBridgeInterceptor (see INTEGRATION.md) signs everything.
-```
-
-#### React / Vue
-
-```js
-async function onLoginSuccess(token) {
-  await SecureBridge.handshake('/secure-bridge/handshake', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  SecureBridge.installFetch();   // or installAxios(axios)
-}
-```
-
-If a signed request ever comes back **`412 handshake_required`** (e.g. the key TTL expired), just call `handshake()` again and retry.
+If a signed request ever comes back **`412 handshake_required`** (e.g. the key TTL expired), `start()` re-handshakes and retries automatically — there is nothing to handle. (For the manual `handshake()` + `install()` pattern and its `412` wrapper, see [INTEGRATION.md → manual control](INTEGRATION.md#advanced-manual-control-handshake-then-install).)
 
 ### Where to keep the key — rules
 
@@ -156,7 +134,7 @@ So the strategy is two layers: **prevent the injection**, and **limit the blast 
   SECURE_BRIDGE_HANDSHAKE=true
   SECURE_BRIDGE_SIGNATURE_DRIVER=ecdsa
   ```
-  The client is identical — `await SecureBridge.handshake(url, { headers: { Authorization: 'Bearer '+token } })` auto-generates the keypair and sends the public key. Nothing else changes.
+  The client is identical — `SecureBridge.start({ handshake, token })` auto-generates the keypair and sends the public key during its handshake. Nothing else changes.
 - **Strict CSP + Trusted Types — built in.** Enable `csp.enabled`, apply the `secure-bridge.csp` middleware to your web routes, and put `@cspNonce` on your `<script>` tags. This is *prevention* (Layer 1) shipped with the package; start with `csp.report_only=true` to find violations first.
 - **Keep the auth token in an HttpOnly cookie / use a BFF.** XSS can't read an HttpOnly cookie's value (it can still ride it for live requests, but can't steal it). A BFF means no usable secret sits in the browser at all. ([OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html))
 - **Short key TTL + rebind** so a captured key dies fast.

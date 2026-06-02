@@ -12,27 +12,25 @@ npm install secure-bridge-client
 
 ## The one call
 
-Once your app has the signing key, **`SecureBridge.install()` signs every request your app makes** — `fetch`, `XMLHttpRequest`, axios, jQuery, Angular `HttpClient` — because it hooks `fetch` and `XMLHttpRequest`, which they all use underneath. You never change individual call sites.
-
-**Separate app with a login (recommended):** fetch a per-session key after login (the *handshake*), then `install()`:
+**Separate app with a login (recommended):** call `SecureBridge.start({...})` **once** at app startup. It fetches a per-session key on the first request (the *handshake*), keeps it in memory, renews it before it expires, and signs **every** request your app makes — `fetch`, `XMLHttpRequest`, axios, jQuery, Angular `HttpClient` — because it hooks `fetch` and `XMLHttpRequest`, which they all use underneath. You never change individual call sites, and there's nothing to wire into login or reloads and no `412` to handle.
 
 ```js
 import SecureBridge from 'secure-bridge-client';
 
-await SecureBridge.handshake('/secure-bridge/handshake', {
-  headers: { Authorization: 'Bearer ' + token },   // your app's login token
+SecureBridge.start({
+  handshake: '/secure-bridge/handshake',
+  token: () => localStorage.getItem('auth_token'),   // however your app stores its login token
 });
-SecureBridge.install();
 ```
 
-Call this **at login and on every page load** — the key lives in memory, so a reload re-fetches it. If a request returns `412 handshake_required`, re-handshake and retry.
+A request made before login (no token yet) is sent unsigned, so public/login routes keep working.
 
 **Same-origin Laravel Blade app:** you don't use this package directly — the `@secureBridge` Blade directive wires it for you.
 
 ## Full guides
 
 - **Server + setup for your case** → [main README](https://github.com/irfanokr/laravel-secure-bridge#readme)
-- **Per-framework client code** (React / Angular / Vue / Svelte / Node / jQuery, with reload + 412 handling) → [docs/INTEGRATION.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/INTEGRATION.md)
+- **Per-framework client code** (React / Angular / Vue / Svelte / Node / jQuery — where the one call goes) → [docs/INTEGRATION.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/INTEGRATION.md)
 - **Key safety & threat model** → [docs/SECURING-THE-KEY.md](https://github.com/irfanokr/laravel-secure-bridge/blob/main/docs/SECURING-THE-KEY.md)
 
 ## License

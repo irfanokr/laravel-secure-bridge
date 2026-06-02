@@ -3,6 +3,45 @@
 All notable changes to `irfanokr/laravel-secure-bridge` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## [1.6.0] - 2026-06-02
+
+### Added — one call sets up a separate front-end (`SecureBridge.start()`)
+- **`SecureBridge.start({ handshake, token, onError, handshakeInit, refreshMargin })`.**
+  A single call placed once at app startup wires signing for a decoupled front-end
+  (React / Angular / Vue / Svelte / plain JS), the same way an HTTP interceptor or
+  `ajaxSetup` does. There is **nothing to wire into the login flow, nothing to re-run
+  after a page reload, and no `412` to handle**:
+  - The per-session key is fetched **lazily on the first request that carries a token**,
+    reused until it nears expiry, and re-fetched automatically.
+  - **No token → the request is sent unsigned**, so public and pre-login routes keep
+    working and no handshake is attempted before login.
+  - Concurrent first requests share **one** in-flight handshake.
+  - The key is renewed **proactively** before the server TTL (from the handshake
+    `expiresIn`) and whenever the **login token changes**, so a `412` is avoided in
+    normal flows for both `fetch` and `XMLHttpRequest`. As a safety net, a `fetch` that
+    still receives a `412` transparently re-handshakes and retries once.
+  - A failed handshake calls `onError` (if given) and the request proceeds unsigned — it
+    never throws into the app's request.
+
+### Compatibility
+- `install()`, `installFetch()`, `installXHR()`, `handshake()` and the `@secureBridge`
+  Blade directive are **unchanged**. Existing setups (manual `handshake()` + `install()`,
+  and Blade session/static mode) keep working exactly as before.
+- **No server-side change** — the handshake endpoint already returns the full client
+  config including `expiresIn`. `expiresIn` is now carried on the client config.
+
+### Documentation
+- README rewritten around the **two center points**: **A — server-rendered Laravel
+  (Blade):** one line, `@secureBridge`; **B — separate front-end + Laravel API:** one
+  call, `SecureBridge.start({ handshake, token })`. Each path is self-contained, ends
+  with a "You're done" and a plain "How to check it worked", with everything else moved
+  into a single Advanced pointer.
+- `docs/INTEGRATION.md` now leads with `start()` and the per-framework placement of that
+  one call; the manual two-call pattern, the `412` wrapper and the reload reasoning are
+  kept as a clearly-labelled advanced section; the full config table, refusal codes,
+  wire format and glossary live here.
+- `docs/SECURING-THE-KEY.md` and `client/README.md` updated to the `start()` form.
+
 ## [1.5.2] - 2026-06-02
 
 ### Documentation

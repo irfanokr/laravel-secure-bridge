@@ -1,6 +1,6 @@
 {
     "name": "secure-bridge-client",
-    "version": "1.1.0",
+    "version": "1.6.0",
     "description": "Framework-agnostic browser client for irfanokr/laravel-secure-bridge: HMAC-SHA256 request signing (timestamp + nonce) and AES-256-GCM payload encryption over the Web Crypto API. Works with fetch, axios, jQuery, Angular, React and Vue.",
     "keywords": [
         "laravel",
